@@ -520,9 +520,10 @@ contract TokenxForwarderActionsTest is BaseTest {
             firstCouponDate:     block.timestamp + 90 days,
             faceValuePerToken:   100e18,
             gracePeriodSeconds:  7 days,
-            callable:            false,
-            callDate:            0,
-            admin:               tokenAdmin
+            callable:               false,
+            callDate:               0,
+            admin:                  tokenAdmin,
+            earlyRedemptionFeeBps:  0
         });
         bt = _makeBT(p, address(forwarder));
 

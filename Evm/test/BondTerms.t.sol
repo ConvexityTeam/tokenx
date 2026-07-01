@@ -28,9 +28,10 @@ contract BondTermsTest is BaseTest {
             firstCouponDate:      FIRST_COUPON,
             faceValuePerToken:    100 ether,
             gracePeriodSeconds:   7 days,
-            callable:             false,
-            callDate:             0,
-            admin:                admin
+            callable:                false,
+            callDate:                0,
+            admin:                   admin,
+            earlyRedemptionFeeBps:   0
         });
     }
 

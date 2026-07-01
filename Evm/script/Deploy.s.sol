@@ -136,9 +136,10 @@ contract DeployBond is Script {
             firstCouponDate:     vm.envUint("FIRST_COUPON_DATE"),
             faceValuePerToken:   vm.envUint("FACE_VALUE_PER_TOKEN"),
             gracePeriodSeconds:  vm.envOr("GRACE_PERIOD_SECONDS", uint256(0)),
-            callable:            vm.envOr("CALLABLE",    false),
-            callDate:            vm.envOr("CALL_DATE",   uint256(0)),
-            admin:               tokenAdmin
+            callable:                 vm.envOr("CALLABLE",    false),
+            callDate:                 vm.envOr("CALL_DATE",   uint256(0)),
+            admin:                    tokenAdmin,
+            earlyRedemptionFeeBps:    vm.envOr("EARLY_REDEMPTION_FEE_BPS", uint256(0))
         });
 
         vm.startBroadcast();

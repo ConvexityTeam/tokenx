@@ -2,10 +2,19 @@
   "license": "ISC",
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "test": "ts-mocha -p ./tsconfig.json -t 1000000 'tests/**/*.test.ts' 'tests/tokenx.ts'",
+    "test:factory": "ts-mocha -p ./tsconfig.json -t 1000000 tests/factory.test.ts",
+    "test:identity": "ts-mocha -p ./tsconfig.json -t 1000000 tests/identity.test.ts",
+    "test:compliance": "ts-mocha -p ./tsconfig.json -t 1000000 tests/compliance.test.ts",
+    "test:token": "ts-mocha -p ./tsconfig.json -t 1000000 tests/token.test.ts",
+    "test:yield": "ts-mocha -p ./tsconfig.json -t 1000000 tests/yield.test.ts",
+    "test:bond": "ts-mocha -p ./tsconfig.json -t 1000000 tests/bond.test.ts",
+    "test:invariants": "ts-mocha -p ./tsconfig.json -t 1000000 tests/invariants.test.ts"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.32.1"
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.9"
   },
   "devDependencies": {
     "chai": "^4.3.4",
@@ -15,6 +24,7 @@
     "@types/chai": "^4.3.0",
     "@types/mocha": "^9.0.0",
     "typescript": "^5.7.3",
-    "prettier": "^2.6.2"
+    "prettier": "^2.6.2",
+    "fast-check": "^3.21.0"
   }
 }
