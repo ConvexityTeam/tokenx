@@ -108,9 +108,10 @@ contract BondFlowTest is BaseTest {
             firstCouponDate:      FIRST_COUPON,
             faceValuePerToken:    FACE,
             gracePeriodSeconds:   7 days,
-            callable:             false,
-            callDate:             0,
-            admin:                tokenAdmin
+            callable:                false,
+            callDate:                0,
+            admin:                   tokenAdmin,
+            earlyRedemptionFeeBps:   0
         });
     }
 

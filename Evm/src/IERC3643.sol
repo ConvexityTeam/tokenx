@@ -51,6 +51,8 @@ interface IBondTerms {
     function isMatured() external view returns (bool);
     function defaulted() external view returns (bool);
     function principalRepaid() external view returns (bool);
+    function earlyRedemptionFeeBps() external view returns (uint256);
+    function penaltyRecipient() external view returns (address);
     function advanceCoupon() external;
     function markDefaulted() external;
     function markPrincipalRepaid() external;

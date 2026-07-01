@@ -67,6 +67,7 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
     event TokensFrozen(address indexed userAddress, uint256 amount);
     event TokensUnfrozen(address indexed userAddress, uint256 amount);
     event PrincipalRedeemed(address indexed investor, uint256 tokenAmount, uint256 principalAmount);
+    event EarlyRedemption(address indexed investor, uint256 tokenAmount, uint256 payout, uint256 penalty, address indexed penaltyRecipient);
 
     /// @dev Disables direct initialization of the implementation contract.
     constructor() ERC20("", "") {
@@ -284,6 +285,51 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
         if (totalSupply() == 0) {
             bondTerms.markPrincipalRepaid();
         }
+    }
+
+    /// @notice Redeem tokens before maturity. The earlyRedemptionFeeBps penalty is deducted
+    ///         from the gross principal and forwarded to penaltyRecipient in BondTerms.
+    ///         Reverts if early redemption is disabled (earlyRedemptionFeeBps == 0).
+    function redeemEarly(address holder, address payoutToken)
+        external onlyRole(AGENT_ROLE) whenNotPaused nonReentrant returns (uint256 payout)
+    {
+        require(address(bondTerms) != address(0),        "ST: no bond terms");
+        require(!bondTerms.isMatured(),                  "ST: use redeemAtMaturity");
+        require(!bondTerms.defaulted(),                  "ST: bond defaulted");
+        require(!bondTerms.principalRepaid(),            "ST: bond closed");
+        require(bondTerms.earlyRedemptionFeeBps() > 0,  "ST: early redemption disabled");
+        require(_compliance.canHold(holder),             "ST: holder not eligible");
+
+        uint256 bal = balanceOf(holder);
+        require(bal > 0, "ST: zero balance");
+
+        uint256 principal = bal * bondTerms.faceValuePerToken() / 1e18;
+        require(principal > 0, "ST: zero principal");
+
+        uint256 feeBps  = bondTerms.earlyRedemptionFeeBps();
+        uint256 penalty = principal * feeBps / 10_000;
+        payout = principal - penalty;
+        address recipient = bondTerms.penaltyRecipient();
+
+        _burn(holder, bal);
+        delete _frozenTokens[holder];
+        _compliance.destroyed(holder, bal);
+
+        if (payoutToken == address(0)) {
+            (bool ok1,) = payable(holder).call{value: payout}("");
+            require(ok1, "ST: ETH transfer failed");
+            if (penalty > 0) {
+                (bool ok2,) = payable(recipient).call{value: penalty}("");
+                require(ok2, "ST: penalty transfer failed");
+            }
+        } else {
+            IERC20(payoutToken).safeTransfer(holder, payout);
+            if (penalty > 0) {
+                IERC20(payoutToken).safeTransfer(recipient, penalty);
+            }
+        }
+
+        emit EarlyRedemption(holder, bal, payout, penalty, recipient);
     }
 
     /// @notice Accept payoutToken funds for principal repayment (or ETH).

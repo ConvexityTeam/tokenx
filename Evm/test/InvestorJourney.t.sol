@@ -129,9 +129,10 @@ contract InvestorJourneyTest is BaseTest {
             firstCouponDate:      FIRST_COUPON,
             faceValuePerToken:    FACE,
             gracePeriodSeconds:   7 days,
-            callable:             false,
-            callDate:             0,
-            admin:                issuer
+            callable:                false,
+            callDate:                0,
+            admin:                   issuer,
+            earlyRedemptionFeeBps:   0
         });
         factory.deployBond(id, "Acme Bond 5y", "ACMB5", address(0), issuer, noLimits, p);
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(id);

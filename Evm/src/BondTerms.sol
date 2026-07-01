@@ -49,6 +49,12 @@ contract BondTerms is Initializable {
     bool    public callable;
     uint256 public callDate;
 
+    // ── Early redemption ──────────────────────────────────────────
+    // 0 = early redemption disabled; > 0 = penalty fee in basis points.
+    uint256 public earlyRedemptionFeeBps;
+    // Receives the penalty on early redemption. Defaults to admin at init.
+    address public penaltyRecipient;
+
     // ── Runtime flags ─────────────────────────────────────────────
     uint256 public nextCouponDate;
     bool    public defaulted;
@@ -59,7 +65,7 @@ contract BondTerms is Initializable {
 
     // ── Upgrade safety ────────────────────────────────────────────
     // solhint-disable-next-line var-name-mixedcase
-    uint256[30] private __gap;
+    uint256[28] private __gap;
 
     // ── Events ────────────────────────────────────────────────────
     event TermsSealed(
@@ -76,6 +82,8 @@ contract BondTerms is Initializable {
     event CouponAdvanced(uint256 previousCouponDate, uint256 newNextCouponDate);
     event Defaulted(uint256 atTimestamp);
     event PrincipalRepaid(uint256 atTimestamp);
+    event EarlyRedemptionFeeSet(uint256 oldFeeBps, uint256 newFeeBps);
+    event PenaltyRecipientSet(address indexed oldRecipient, address indexed newRecipient);
 
     struct InitParams {
         uint256  annualRateBps;
@@ -89,6 +97,7 @@ contract BondTerms is Initializable {
         bool     callable;
         uint256  callDate;
         address  admin;
+        uint256  earlyRedemptionFeeBps;
     }
 
     constructor() {
@@ -101,6 +110,7 @@ contract BondTerms is Initializable {
         require(p.firstCouponDate > p.issueDate,                        "BT: first coupon <= issue");
         require(p.firstCouponDate <= p.maturityDate,                    "BT: first coupon > maturity");
         require(p.annualRateBps <= 10_000,                              "BT: rate > 100%");
+        require(p.earlyRedemptionFeeBps <= 10_000,                      "BT: early fee > 100%");
         require(p.faceValuePerToken > 0,                                "BT: zero face value");
         require(p.admin != address(0),                                  "BT: zero admin");
         require(
@@ -122,9 +132,11 @@ contract BondTerms is Initializable {
         firstCouponDate      = p.firstCouponDate;
         faceValuePerToken    = p.faceValuePerToken;
         gracePeriodSeconds   = p.gracePeriodSeconds;
-        callable             = p.callable;
-        callDate             = p.callDate;
-        nextCouponDate       = p.firstCouponDate;
+        callable              = p.callable;
+        callDate              = p.callDate;
+        earlyRedemptionFeeBps = p.earlyRedemptionFeeBps;
+        penaltyRecipient      = p.admin;
+        nextCouponDate        = p.firstCouponDate;
 
         rateHistory.push(RateEntry({ rateBps: p.annualRateBps, effectiveAt: block.timestamp }));
 
@@ -181,6 +193,27 @@ contract BondTerms is Initializable {
 
     function getRateHistoryLength() external view returns (uint256) {
         return rateHistory.length;
+    }
+
+    // ── Early redemption config ───────────────────────────────────
+
+    /// @notice Set the early-redemption penalty fee. Set to 0 to disable early redemption.
+    function setEarlyRedemptionFee(uint256 newFeeBps) external {
+        require(_msgSender() == admin, "BT: not admin");
+        require(!principalRepaid,      "BT: bond closed");
+        require(newFeeBps <= 10_000,   "BT: fee > 100%");
+        uint256 old = earlyRedemptionFeeBps;
+        earlyRedemptionFeeBps = newFeeBps;
+        emit EarlyRedemptionFeeSet(old, newFeeBps);
+    }
+
+    /// @notice Update the address that receives early-redemption penalties.
+    function setPenaltyRecipient(address newRecipient) external {
+        require(_msgSender() == admin,      "BT: not admin");
+        require(newRecipient != address(0), "BT: zero recipient");
+        address old = penaltyRecipient;
+        penaltyRecipient = newRecipient;
+        emit PenaltyRecipientSet(old, newRecipient);
     }
 
     // ── Coupon math ───────────────────────────────────────────────

@@ -97,9 +97,10 @@ contract BondFlowForwarderTest is BaseTest {
             firstCouponDate:      FIRST_COUPON,
             faceValuePerToken:    FACE,
             gracePeriodSeconds:   7 days,
-            callable:             false,
-            callDate:             0,
-            admin:                address(this)
+            callable:                false,
+            callDate:                0,
+            admin:                   address(this),
+            earlyRedemptionFeeBps:   0
         });
 
         (address t, address bt) = factory.deployBond(
