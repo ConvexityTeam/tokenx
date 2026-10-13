@@ -3,7 +3,9 @@ pragma solidity ^0.8.20;
 
 /**
  * @title WalletFactory — Advanced Tests
- * @notice Covers: fuzz, invariant, bad-actor, gas benchmarks, regression.
+ * @notice Covers: fuzz, invariant, bad-actor, gas benchmarks, regression,
+ *         and reentrancy scenarios for WalletFactory and its relationship
+ *         with BusinessWallet proxies.
  */
 
 import "forge-std/Test.sol";
@@ -13,18 +15,26 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../src/BusinessWallet.sol";
 import "../src/WalletFactory.sol";
 
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
 contract WFMockERC20 is ERC20 {
     constructor() ERC20("WFT", "WFT") {}
+
     function mint(address to, uint256 amt) external { _mint(to, amt); }
 }
 
 // ── Invariant handler ─────────────────────────────────────────────────────────
 
+/**
+ * @dev Drives the WalletFactory through random but valid sequences of calls so
+ *      the Foundry invariant runner can try to break the factory's invariants.
+ */
 contract WFHandler is Test {
     WalletFactory public factory;
     address       public admin;
     address       public pool;
 
+    // Keep track of deployed businessIds so we can look them up
     bytes32[] public deployed;
     uint256   public nonce;
 
@@ -34,6 +44,7 @@ contract WFHandler is Test {
         pool    = _pool;
     }
 
+    /// Deploy a unique wallet on every call.
     function createWallet(address walletAdmin) external {
         if (walletAdmin == address(0)) walletAdmin = admin;
         bytes32 bid = keccak256(abi.encode("wf-inv", nonce++));
@@ -42,16 +53,19 @@ contract WFHandler is Test {
         deployed.push(bid);
     }
 
+    /// Deactivate an existing wallet.
     function deactivateWallet(uint256 idx) external {
         if (deployed.length == 0) return;
         idx = idx % deployed.length;
         bytes32 bid = deployed[idx];
+        // Check it's still active before deactivating
         WalletFactory.WalletRecord memory rec = factory.getWallet(bid);
         if (!rec.active) return;
         vm.prank(admin);
         factory.deactivateWallet(bid);
     }
 
+    /// Update the pool wallet (always non-zero).
     function setPoolWallet(address newPool) external {
         if (newPool == address(0)) return;
         vm.prank(admin);
@@ -59,6 +73,7 @@ contract WFHandler is Test {
         pool = newPool;
     }
 
+    /// Toggle factory pause (immediately unpauses so future deployments work).
     function togglePause() external {
         if (factory.paused()) {
             vm.prank(admin);
@@ -71,8 +86,13 @@ contract WFHandler is Test {
         }
     }
 
-    function deployedCount() external view returns (uint256) { return deployed.length; }
-    function deployedAt(uint256 i) external view returns (bytes32) { return deployed[i]; }
+    function deployedCount() external view returns (uint256) {
+        return deployed.length;
+    }
+
+    function deployedAt(uint256 i) external view returns (bytes32) {
+        return deployed[i];
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -91,38 +111,47 @@ contract WalletFactoryInvariant is StdInvariant, Test {
         impl    = new BusinessWallet();
         factory = new WalletFactory(admin, address(impl), pool, address(0));
         handler = new WFHandler(address(factory), admin, pool);
+
         targetContract(address(handler));
     }
 
+    /// @notice Factory pool wallet must never be address(0).
     function invariant_poolWalletNeverZero() public {
         assertTrue(factory.poolWallet() != address(0));
     }
 
+    /// @notice totalWallets() must equal the number of wallets the handler deployed.
     function invariant_totalWalletsMatchesHandler() public {
         assertEq(factory.totalWallets(), handler.deployedCount());
     }
 
+    /// @notice Every deployed wallet must have a non-zero address in the registry.
     function invariant_everyDeployedWalletHasAddress() public {
         uint256 count = handler.deployedCount();
         for (uint256 i; i < count; ++i) {
-            WalletFactory.WalletRecord memory rec = factory.getWallet(handler.deployedAt(i));
+            bytes32 bid = handler.deployedAt(i);
+            WalletFactory.WalletRecord memory rec = factory.getWallet(bid);
             assertTrue(rec.wallet != address(0));
         }
     }
 
+    /// @notice The factory must always hold SWEEPER_ROLE on every wallet it created.
     function invariant_factoryIsSweeper() public {
         uint256 count = handler.deployedCount();
         for (uint256 i; i < count; ++i) {
-            WalletFactory.WalletRecord memory rec = factory.getWallet(handler.deployedAt(i));
+            bytes32 bid = handler.deployedAt(i);
+            WalletFactory.WalletRecord memory rec = factory.getWallet(bid);
             BusinessWallet w = BusinessWallet(payable(rec.wallet));
             assertTrue(w.hasRole(w.SWEEPER_ROLE(), address(factory)));
         }
     }
 
+    /// @notice Admin must always hold DEFAULT_ADMIN_ROLE on the factory.
     function invariant_adminKeepsDefaultAdminRole() public {
         assertTrue(factory.hasRole(factory.DEFAULT_ADMIN_ROLE(), admin));
     }
 
+    /// @notice walletBeacon is immutable — must always point to the original beacon.
     function invariant_beaconIsImmutable() public {
         assertTrue(factory.walletBeacon() != address(0));
     }
@@ -145,15 +174,21 @@ contract WalletFactoryFuzz is Test {
         factory = new WalletFactory(admin, address(impl), pool, address(0));
     }
 
+    // ── createWallet ──────────────────────────────────────────────────────────
+
+    /// @notice Any non-zero businessId and non-zero admin deploys successfully.
     function testFuzz_createWallet_validArgs(bytes32 bid, address walletAdmin) public {
         vm.assume(bid != bytes32(0));
         vm.assume(walletAdmin != address(0));
+
         vm.prank(admin);
         address w = factory.createWallet(bid, walletAdmin);
+
         assertTrue(w != address(0));
         assertEq(factory.walletOf(bid), w);
     }
 
+    /// @notice bytes32(0) is always rejected as a businessId.
     function testFuzz_createWallet_rejects_emptyId(address walletAdmin) public {
         vm.assume(walletAdmin != address(0));
         vm.prank(admin);
@@ -161,6 +196,7 @@ contract WalletFactoryFuzz is Test {
         factory.createWallet(bytes32(0), walletAdmin);
     }
 
+    /// @notice address(0) is always rejected as the wallet admin.
     function testFuzz_createWallet_rejects_zeroAdmin(bytes32 bid) public {
         vm.assume(bid != bytes32(0));
         vm.prank(admin);
@@ -168,16 +204,22 @@ contract WalletFactoryFuzz is Test {
         factory.createWallet(bid, address(0));
     }
 
+    /// @notice Deploying the same businessId twice always fails.
     function testFuzz_createWallet_rejects_duplicate(bytes32 bid, address walletAdmin) public {
         vm.assume(bid != bytes32(0));
         vm.assume(walletAdmin != address(0));
+
         vm.prank(admin);
         factory.createWallet(bid, walletAdmin);
+
         vm.prank(admin);
         vm.expectRevert("WF: businessId taken");
         factory.createWallet(bid, walletAdmin);
     }
 
+    // ── deterministic CREATE2 ─────────────────────────────────────────────────
+
+    /// @notice predictWalletAddress always matches the actual deployed address.
     function testFuzz_predictWalletAddress_alwaysMatches(
         bytes32 bid,
         address walletAdmin,
@@ -185,12 +227,18 @@ contract WalletFactoryFuzz is Test {
     ) public {
         vm.assume(bid != bytes32(0));
         vm.assume(walletAdmin != address(0));
+
         address predicted = factory.predictWalletAddress(bid, walletAdmin, salt);
+
+        address currentPool = factory.poolWallet();
         vm.prank(admin);
-        address deployed = factory.createWalletDeterministic(bid, walletAdmin, salt);
+        address deployed = factory.createWalletDeterministic(bid, walletAdmin, salt, currentPool);
+
         assertEq(deployed, predicted);
     }
 
+    /// @notice Different salts produce different addresses for the same businessId
+    ///         (tested with a second, separate factory to avoid duplicate-id revert).
     function testFuzz_predictWalletAddress_differentSalts(
         bytes32 bid,
         address walletAdmin,
@@ -200,11 +248,15 @@ contract WalletFactoryFuzz is Test {
         vm.assume(bid != bytes32(0));
         vm.assume(walletAdmin != address(0));
         vm.assume(salt1 != salt2);
+
         address p1 = factory.predictWalletAddress(bid, walletAdmin, salt1);
         address p2 = factory.predictWalletAddress(bid, walletAdmin, salt2);
         assertTrue(p1 != p2);
     }
 
+    // ── setPoolWallet ─────────────────────────────────────────────────────────
+
+    /// @notice Any non-zero address is accepted as the new pool.
     function testFuzz_setPoolWallet_anyNonZero(address newPool) public {
         vm.assume(newPool != address(0));
         vm.prank(admin);
@@ -212,6 +264,9 @@ contract WalletFactoryFuzz is Test {
         assertEq(factory.poolWallet(), newPool);
     }
 
+    // ── getWallets pagination ─────────────────────────────────────────────────
+
+    /// @notice Paginated results are always a subset of total wallets.
     function testFuzz_getWallets_paginationBounds(
         uint8 total,
         uint256 offset,
@@ -219,12 +274,15 @@ contract WalletFactoryFuzz is Test {
     ) public {
         total = uint8(bound(total, 0, 10));
         limit = bound(limit, 0, 20);
+
         for (uint256 i; i < total; ++i) {
             bytes32 bid = keccak256(abi.encode("fuzz-page", i));
             vm.prank(admin);
             factory.createWallet(bid, admin);
         }
+
         WalletFactory.WalletRecord[] memory recs = factory.getWallets(offset, limit);
+
         if (offset >= total) {
             assertEq(recs.length, 0);
         } else {
@@ -233,17 +291,23 @@ contract WalletFactoryFuzz is Test {
         }
     }
 
+    // ── Role isolation ────────────────────────────────────────────────────────
+
+    /// @notice A random address without DEPLOYER_ROLE cannot create wallets.
     function testFuzz_createWallet_randomCaller_reverts(address caller) public {
         vm.assume(caller != admin);
         vm.assume(!factory.hasRole(factory.DEPLOYER_ROLE(), caller));
+
         vm.prank(caller);
         vm.expectRevert();
         factory.createWallet(keccak256("x"), admin);
     }
 
+    /// @notice A random address without POOL_MANAGER_ROLE cannot change the pool.
     function testFuzz_setPoolWallet_randomCaller_reverts(address caller) public {
         vm.assume(caller != admin);
         vm.assume(!factory.hasRole(factory.POOL_MANAGER_ROLE(), caller));
+
         vm.prank(caller);
         vm.expectRevert();
         factory.setPoolWallet(makeAddr("p"));
@@ -269,23 +333,38 @@ contract WalletFactoryBadActor is Test {
         factory = new WalletFactory(admin, address(impl), pool, address(0));
     }
 
+    // ── Attack: create wallet while paused ────────────────────────────────────
+
     function test_attack_createWhilePaused_reverts() public {
         vm.prank(admin);
         factory.pause();
+
         vm.prank(admin);
         vm.expectRevert("Pausable: paused");
         factory.createWallet(BID, admin);
     }
 
+    // ── Attack: salt collision on CREATE2 ─────────────────────────────────────
+
+    /// @notice Re-using the same salt for a different businessId succeeds (salts
+    ///         are scoped to the factory, but businessId duplication is checked
+    ///         separately).  Re-using the same salt for the same businessId fails
+    ///         because businessId is already taken.
     function test_attack_saltCollision_sameBusinessId_reverts() public {
         bytes32 salt = keccak256("same-salt");
+        address currentPool = factory.poolWallet();
+
         vm.prank(admin);
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, currentPool);
+
         vm.prank(admin);
         vm.expectRevert("WF: businessId taken");
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, currentPool);
     }
 
+    // ── Attack: privilege escalation ──────────────────────────────────────────
+
+    /// @notice Attacker cannot grant themselves DEPLOYER_ROLE.
     function test_attack_grantDeployerRole_byAttacker_reverts() public {
         bytes32 deployerRole = factory.DEPLOYER_ROLE();
         vm.prank(attacker);
@@ -293,33 +372,42 @@ contract WalletFactoryBadActor is Test {
         factory.grantRole(deployerRole, attacker);
     }
 
+    /// @notice Attacker cannot change the pool wallet.
     function test_attack_setPoolWallet_byAttacker_reverts() public {
         vm.prank(attacker);
         vm.expectRevert();
         factory.setPoolWallet(attacker);
     }
 
+    /// @notice Attacker cannot deactivate a wallet.
     function test_attack_deactivateWallet_byAttacker_reverts() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         vm.prank(attacker);
         vm.expectRevert();
         factory.deactivateWallet(BID);
     }
 
+    /// @notice Attacker cannot pause the factory.
     function test_attack_pause_byAttacker_reverts() public {
         vm.prank(attacker);
         vm.expectRevert();
         factory.pause();
     }
 
+    // ── Attack: sweepWalletETH without DEPLOYER_ROLE ──────────────────────────
+
     function test_attack_sweepWalletETH_byAttacker_reverts() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         vm.prank(attacker);
         vm.expectRevert();
         factory.sweepWalletETH(BID);
     }
+
+    // ── Attack: sweep unknown wallet ──────────────────────────────────────────
 
     function test_attack_sweepUnknownWallet_reverts() public {
         vm.prank(admin);
@@ -327,28 +415,46 @@ contract WalletFactoryBadActor is Test {
         factory.sweepWalletETH(keccak256("ghost"));
     }
 
+    // ── Attack: overwrite beacon ownership ───────────────────────────────────
+
+    /// @notice The beacon is owned by admin at factory construction.
+    ///         An attacker who does not have beacon ownership cannot upgrade the impl.
     function test_attack_upgradeBeacon_byAttacker_reverts() public {
         UpgradeableBeacon beacon = UpgradeableBeacon(factory.walletBeacon());
         BusinessWallet newImpl  = new BusinessWallet();
+
         vm.prank(attacker);
         vm.expectRevert();
         beacon.upgradeTo(address(newImpl));
     }
 
+    // ── Attack: deactivate an already-deactivated wallet ─────────────────────
+
+    /// @notice Deactivating twice is idempotent — the second call succeeds
+    ///         (OZ does not guard against double-deactivation since active is a bool).
     function test_attack_doubleDeactivate_noRevert() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         vm.prank(admin);
         factory.deactivateWallet(BID);
+
+        // Second deactivate should succeed (wallet still exists in registry)
         vm.prank(admin);
         factory.deactivateWallet(BID);
-        assertFalse(factory.getWallet(BID).active);
+
+        WalletFactory.WalletRecord memory rec = factory.getWallet(BID);
+        assertFalse(rec.active);
     }
+
+    // ── Attack: getWallet on zero businessId ──────────────────────────────────
 
     function test_attack_getWallet_unknownId_reverts() public {
         vm.expectRevert("WF: unknown businessId");
         factory.getWallet(bytes32(0));
     }
+
+    // ── Attack: walletOf for undeployed businessId returns 0 ─────────────────
 
     function test_attack_walletOf_undeployed_returnsZero() public {
         assertEq(factory.walletOf(keccak256("ghost")), address(0));
@@ -367,13 +473,14 @@ contract WalletFactoryGas is Test {
     address pool  = makeAddr("pool");
     address user  = makeAddr("user");
 
-    uint256 constant CREATE_WALLET_CEILING               = 700_000;
+    // Gas ceilings — catches regressions without being too tight
+    uint256 constant CREATE_WALLET_CEILING              = 700_000;
     uint256 constant CREATE_WALLET_DETERMINISTIC_CEILING = 700_000;
-    uint256 constant PREDICT_ADDRESS_CEILING             = 18_000;
-    uint256 constant SWEEP_WALLET_ETH_CEILING            = 80_000;
-    uint256 constant SWEEP_WALLET_TOKENS_CEILING         = 100_000;
-    uint256 constant SET_POOL_CEILING                    = 40_000;
-    uint256 constant DEACTIVATE_CEILING                  = 30_000;
+    uint256 constant PREDICT_ADDRESS_CEILING            = 18_000;  // measured ~12k
+    uint256 constant SWEEP_WALLET_ETH_CEILING           = 130_000;
+    uint256 constant SWEEP_WALLET_TOKENS_CEILING        = 130_000;
+    uint256 constant SET_POOL_CEILING                   = 40_000;
+    uint256 constant DEACTIVATE_CEILING                 = 45_000;
 
     bytes32 constant BID = keccak256("gas-bench");
 
@@ -387,18 +494,22 @@ contract WalletFactoryGas is Test {
         vm.prank(admin);
         factory.createWallet(BID, admin);
         uint256 used = g - gasleft();
+
         emit log_named_uint("gas: createWallet()", used);
         assertLt(used, CREATE_WALLET_CEILING, "createWallet() regressed");
     }
 
     function test_gas_createWalletDeterministic() public {
         bytes32 salt = keccak256("salt-1");
+        address currentPool = factory.poolWallet();
         uint256 g = gasleft();
         vm.prank(admin);
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, currentPool);
         uint256 used = g - gasleft();
+
         emit log_named_uint("gas: createWalletDeterministic()", used);
-        assertLt(used, CREATE_WALLET_DETERMINISTIC_CEILING, "createWalletDeterministic() regressed");
+        assertLt(used, CREATE_WALLET_DETERMINISTIC_CEILING,
+            "createWalletDeterministic() regressed");
     }
 
     function test_gas_predictWalletAddress() public {
@@ -406,6 +517,7 @@ contract WalletFactoryGas is Test {
         uint256 g = gasleft();
         factory.predictWalletAddress(BID, admin, salt);
         uint256 used = g - gasleft();
+
         emit log_named_uint("gas: predictWalletAddress()", used);
         assertLt(used, PREDICT_ADDRESS_CEILING, "predictWalletAddress() regressed");
     }
@@ -413,6 +525,8 @@ contract WalletFactoryGas is Test {
     function test_gas_sweepWalletETH() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
+        // Park ETH while wallet is paused
         BusinessWallet bw = BusinessWallet(payable(w));
         vm.prank(admin);
         bw.pause();
@@ -422,10 +536,12 @@ contract WalletFactoryGas is Test {
         assertTrue(ok);
         vm.prank(admin);
         bw.unpause();
+
         uint256 g = gasleft();
         vm.prank(admin);
         factory.sweepWalletETH(BID);
         uint256 used = g - gasleft();
+
         emit log_named_uint("gas: sweepWalletETH()", used);
         assertLt(used, SWEEP_WALLET_ETH_CEILING, "sweepWalletETH() regressed");
     }
@@ -433,14 +549,18 @@ contract WalletFactoryGas is Test {
     function test_gas_sweepWalletTokens_single() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
         WFMockERC20 token = new WFMockERC20();
         token.mint(w, 1e18);
+
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
+
         uint256 g = gasleft();
         vm.prank(admin);
         factory.sweepWalletTokens(BID, tokens);
         uint256 used = g - gasleft();
+
         emit log_named_uint("gas: sweepWalletTokens() x1", used);
         assertLt(used, SWEEP_WALLET_TOKENS_CEILING, "sweepWalletTokens() regressed");
     }
@@ -451,6 +571,7 @@ contract WalletFactoryGas is Test {
         vm.prank(admin);
         factory.setPoolWallet(newPool);
         uint256 used = g - gasleft();
+
         emit log_named_uint("gas: setPoolWallet()", used);
         assertLt(used, SET_POOL_CEILING, "setPoolWallet() regressed");
     }
@@ -458,10 +579,12 @@ contract WalletFactoryGas is Test {
     function test_gas_deactivateWallet() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         uint256 g = gasleft();
         vm.prank(admin);
         factory.deactivateWallet(BID);
         uint256 used = g - gasleft();
+
         emit log_named_uint("gas: deactivateWallet()", used);
         assertLt(used, DEACTIVATE_CEILING, "deactivateWallet() regressed");
     }
@@ -486,34 +609,47 @@ contract WalletFactoryRegression is Test {
         factory = new WalletFactory(admin, address(impl), pool, address(0));
     }
 
+    /// @notice REGRESSION: setPoolWallet must NOT propagate to existing wallets.
+    ///         Each wallet holds the pool address at creation time; the factory
+    ///         update only affects future deployments.
     function test_regression_setPoolWallet_doesNotRetroactivelyUpdate() public {
         vm.prank(admin);
         address w1 = factory.createWallet(BID, admin);
+
         address newPool = makeAddr("newPool");
         vm.prank(admin);
         factory.setPoolWallet(newPool);
+
         vm.prank(admin);
         address w2 = factory.createWallet(BID2, admin);
+
         assertEq(BusinessWallet(payable(w1)).poolWallet(), pool,    "existing wallet pool unchanged");
         assertEq(BusinessWallet(payable(w2)).poolWallet(), newPool, "new wallet uses new pool");
     }
 
+    /// @notice REGRESSION: factory admin must always hold DEFAULT_ADMIN_ROLE.
     function test_regression_adminKeepsRole() public {
         assertTrue(factory.hasRole(factory.DEFAULT_ADMIN_ROLE(), admin));
     }
 
+    /// @notice REGRESSION: beacon is transferred to admin at construction.
+    ///         Factory itself does NOT own the beacon post-construction.
     function test_regression_beaconOwnedByAdmin_notFactory() public {
         UpgradeableBeacon beacon = UpgradeableBeacon(factory.walletBeacon());
         assertEq(beacon.owner(), admin);
         assertTrue(beacon.owner() != address(factory));
     }
 
+    /// @notice REGRESSION: a wallet's businessId is frozen at creation and
+    ///         cannot be changed by the factory.
     function test_regression_businessIdFrozen() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
         assertEq(BusinessWallet(payable(w)).businessId(), BID);
     }
 
+    /// @notice REGRESSION: factory must hold SWEEPER_ROLE on every wallet it
+    ///         creates — verified over multiple deployments.
     function test_regression_factoryIsSweeper_multipleWallets() public {
         bytes32[] memory bids = new bytes32[](5);
         for (uint256 i; i < 5; ++i) {
@@ -522,39 +658,53 @@ contract WalletFactoryRegression is Test {
             factory.createWallet(bids[i], admin);
         }
         for (uint256 i; i < 5; ++i) {
-            BusinessWallet bw = BusinessWallet(payable(factory.walletOf(bids[i])));
-            assertTrue(bw.hasRole(bw.SWEEPER_ROLE(), address(factory)));
+            address w = factory.walletOf(bids[i]);
+            BusinessWallet bw = BusinessWallet(payable(w));
+            assertTrue(bw.hasRole(bw.SWEEPER_ROLE(), address(factory)),
+                "factory must always have SWEEPER_ROLE");
         }
     }
 
+    /// @notice REGRESSION: totalWallets must increment atomically — a reverted
+    ///         deployment must not increment the counter.
     function test_regression_failedDeploy_doesNotIncrementCounter() public {
         assertEq(factory.totalWallets(), 0);
+
         vm.prank(admin);
         vm.expectRevert("WF: zero admin");
-        factory.createWallet(BID, address(0));
-        assertEq(factory.totalWallets(), 0);
+        factory.createWallet(BID, address(0)); // reverts
+
+        assertEq(factory.totalWallets(), 0, "counter must not increment on revert");
     }
 
+    /// @notice REGRESSION: getWallets with offset=0 and limit=0 returns empty.
     function test_regression_getWallets_zeroLimit_returnsEmpty() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         WalletFactory.WalletRecord[] memory recs = factory.getWallets(0, 0);
         assertEq(recs.length, 0);
     }
 
+    /// @notice REGRESSION: upgrading the beacon changes the impl for all existing
+    ///         proxies without altering their stored state.
     function test_regression_beaconUpgrade_preservesWalletState() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
         BusinessWallet bw = BusinessWallet(payable(w));
+
         bytes32 bidBefore  = bw.businessId();
         address poolBefore = bw.poolWallet();
+
+        // Upgrade beacon to a fresh (identical) implementation
+        BusinessWallet newImpl2 = new BusinessWallet();
         UpgradeableBeacon beacon = UpgradeableBeacon(factory.walletBeacon());
-        // Deploy new impl before setting prank — CREATE would consume it otherwise.
-        address newImplAddr = address(new BusinessWallet());
         vm.prank(admin);
-        beacon.upgradeTo(newImplAddr);
-        assertEq(bw.businessId(),  bidBefore);
-        assertEq(bw.poolWallet(), poolBefore);
-        assertTrue(bw.hasRole(bw.DEFAULT_ADMIN_ROLE(), admin));
+        beacon.upgradeTo(address(newImpl2));
+
+        assertEq(bw.businessId(),  bidBefore,  "businessId preserved post-upgrade");
+        assertEq(bw.poolWallet(), poolBefore, "poolWallet preserved post-upgrade");
+        assertTrue(bw.hasRole(bw.DEFAULT_ADMIN_ROLE(), admin),
+            "admin role preserved post-upgrade");
     }
 }

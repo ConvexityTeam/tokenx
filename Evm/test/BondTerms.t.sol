@@ -83,8 +83,18 @@ contract BondTermsTest is BaseTest {
 
     function testRevert_initialize_maturityBeforeIssue() public {
         BondTerms.InitParams memory p = _defaultParams();
-        p.maturityDate = p.issueDate;
+        p.issueDate    = block.timestamp + 10 days;
+        p.maturityDate = block.timestamp + 5 days;
         vm.expectRevert("BT: maturity <= issue");
+        _makeBT(p);
+    }
+
+    function testRevert_initialize_maturityInThePast() public {
+        BondTerms.InitParams memory p = _defaultParams();
+        p.issueDate        = block.timestamp - 10 days;
+        p.firstCouponDate  = block.timestamp - 5 days;
+        p.maturityDate     = block.timestamp;
+        vm.expectRevert("BT: maturity in the past");
         _makeBT(p);
     }
 

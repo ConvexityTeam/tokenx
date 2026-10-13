@@ -22,13 +22,21 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
     bytes32 public constant AGENT_ROLE  = keccak256("AGENT_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
+    uint256 public constant MIN_RECLAIM_WINDOW = 3 days;
+
     // EIP-2771: stored (not immutable) so clones can each have their own value.
     address public trustedForwarder;
 
-    IERC3643          public shareToken;
-    IIdentityRegistry public identityRegistry;
-    ICompliance       public compliance;
-    IBondTerms        public bondTerms;
+    IERC3643   public shareToken;
+    IBondTerms public bondTerms;
+
+    function identityRegistry() external view returns (IIdentityRegistry) {
+        return shareToken.identityRegistry();
+    }
+
+    function compliance() external view returns (ICompliance) {
+        return shareToken.compliance();
+    }
 
     struct Snapshot {
         uint256 id;
@@ -72,8 +80,6 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
         require(admin       != address(0), "YD: zero admin");
 
         shareToken       = IERC3643(_shareToken);
-        identityRegistry = shareToken.identityRegistry();
-        compliance       = shareToken.compliance();
         trustedForwarder = trustedForwarder_;
 
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -95,7 +101,8 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
         uint256   fundAmount,
         uint256   reclaimAfter,
         string    calldata description
-    ) external payable onlyRole(AGENT_ROLE) whenNotPaused returns (uint256 snapshotId) {
+    ) external payable onlyRole(AGENT_ROLE) whenNotPaused nonReentrant returns (uint256 snapshotId) {
+        require(reclaimAfter >= MIN_RECLAIM_WINDOW, "YD: reclaim window too short");
 
         snapshotId = ++snapshotCount;
 
@@ -104,6 +111,7 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
             require(msg.value > 0, "YD: no ETH sent");
             receivedFunds = msg.value;
         } else {
+            require(msg.value == 0, "YD: ETH not allowed");
             require(fundAmount > 0, "YD: zero fund amount");
             IERC20(payoutToken_).safeTransferFrom(_msgSender(), address(this), fundAmount);
             receivedFunds = fundAmount;
@@ -112,6 +120,7 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
         uint256 eligibleSupply;
         for (uint256 i = 0; i < investors.length; i++) {
             address inv = investors[i];
+            if (snapshotBalance[snapshotId][inv] != 0) continue;
             if (!_isEligible(inv)) continue;
             uint256 bal = shareToken.balanceOf(inv);
             if (bal == 0) continue;
@@ -147,7 +156,8 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
         address   payoutToken_,
         uint256   reclaimAfter,
         string    calldata description
-    ) external payable onlyRole(AGENT_ROLE) whenNotPaused returns (uint256 snapshotId) {
+    ) external payable onlyRole(AGENT_ROLE) whenNotPaused nonReentrant returns (uint256 snapshotId) {
+        require(reclaimAfter >= MIN_RECLAIM_WINDOW, "YD: reclaim window too short");
         require(address(bondTerms) != address(0), "YD: no bond terms");
         require(bondTerms.isCouponDue(),          "YD: coupon not due");
         require(!bondTerms.defaulted(),           "YD: bond defaulted");
@@ -158,6 +168,7 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
         uint256 eligibleSupply;
         for (uint256 i = 0; i < investors.length; i++) {
             address inv = investors[i];
+            if (snapshotBalance[snapshotId][inv] != 0) continue;
             if (!_isEligible(inv)) continue;
             uint256 bal = shareToken.balanceOf(inv);
             if (bal == 0) continue;
@@ -273,9 +284,9 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
     }
 
     function _isEligible(address investor) internal view returns (bool) {
-        if (!identityRegistry.isVerified(investor)) return false;
-        if (shareToken.isFrozen(investor))          return false;
-        if (!compliance.canHold(investor))          return false;
+        if (!shareToken.identityRegistry().isVerified(investor)) return false;
+        if (shareToken.isFrozen(investor))                      return false;
+        if (!shareToken.compliance().canHold(investor))         return false;
         return true;
     }
 
@@ -319,6 +330,10 @@ contract YieldDistributor is AccessControl, ReentrancyGuard, Pausable, Initializ
             return msg.data[:msg.data.length - 20];
         }
         return msg.data;
+    }
+
+    function setTrustedForwarder(address newForwarder) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        trustedForwarder = newForwarder;
     }
 
     function pause()   external onlyRole(PAUSER_ROLE) { _pause(); }

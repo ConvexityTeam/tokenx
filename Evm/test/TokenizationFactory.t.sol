@@ -20,6 +20,7 @@ contract TokenizationFactoryTest is BaseTest {
     address deployer   = address(0xDE91);
     address nobody     = address(0xDEAD);
     address tokenAdmin = address(0xAD1);
+    address issuerOnchainID = address(0x101);
 
     TokenizationFactory.ComplianceParams noLimits = TokenizationFactory.ComplianceParams({
         maxShareholders: 0,
@@ -58,7 +59,7 @@ contract TokenizationFactoryTest is BaseTest {
         address token = factory.deployToken(
             TokenizationFactory.TokenType.SECURITY,
             "ACME-2025", "Acme Bond", "ACMB",
-            address(0), tokenAdmin, noLimits
+            issuerOnchainID, tokenAdmin, noLimits
         );
 
         assertTrue(token != address(0));
@@ -87,7 +88,7 @@ contract TokenizationFactoryTest is BaseTest {
         );
         factory.deployToken(
             TokenizationFactory.TokenType.SECURITY,
-            "EVT-001", "Event Token", "EVT", address(0), tokenAdmin, noLimits
+            "EVT-001", "Event Token", "EVT", issuerOnchainID, tokenAdmin, noLimits
         );
     }
 
@@ -97,7 +98,7 @@ contract TokenizationFactoryTest is BaseTest {
         address token = factory.deployToken(
             TokenizationFactory.TokenType.YIELD_BEARING,
             "YIELD-001", "Yield Bond", "YBD",
-            address(0), tokenAdmin, noLimits
+            issuerOnchainID, tokenAdmin, noLimits
         );
 
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("YIELD-001");
@@ -111,27 +112,34 @@ contract TokenizationFactoryTest is BaseTest {
 
     // ── deployToken: input validation reverts ─────────────────────
 
+    function testRevert_deployToken_zeroIssuerOnchainID() public {
+        vm.expectRevert("Factory: zero issuer onchainID");
+        factory.deployToken(
+            TokenizationFactory.TokenType.SECURITY, "ID-ZERO", "Name", "SYM", address(0), tokenAdmin, noLimits
+        );
+    }
+
     function testRevert_deployToken_emptyIssuerId() public {
         vm.expectRevert("Factory: empty issuerId");
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
     }
 
     function testRevert_deployToken_zeroTokenAdmin() public {
         vm.expectRevert("Factory: zero tokenAdmin");
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "ID-001", "Name", "SYM", address(0), address(0), noLimits
+            TokenizationFactory.TokenType.SECURITY, "ID-001", "Name", "SYM", issuerOnchainID, address(0), noLimits
         );
     }
 
     function testRevert_deployToken_duplicateIssuerId() public {
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "DUP-001", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "DUP-001", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
         vm.expectRevert("Factory: issuerId taken");
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "DUP-001", "Name2", "SYM2", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "DUP-001", "Name2", "SYM2", issuerOnchainID, tokenAdmin, noLimits
         );
     }
 
@@ -139,7 +147,7 @@ contract TokenizationFactoryTest is BaseTest {
         vm.prank(nobody);
         vm.expectRevert();
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "SOME-ID", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "SOME-ID", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
     }
 
@@ -147,14 +155,14 @@ contract TokenizationFactoryTest is BaseTest {
         factory.pause();
         vm.expectRevert("Pausable: paused");
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "PAUSED-ID", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "PAUSED-ID", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
     }
 
     function testRevert_deployToken_bondTypeRejected() public {
         vm.expectRevert("Factory: use deployBond for BOND");
         factory.deployToken(
-            TokenizationFactory.TokenType.BOND, "BOND-ID", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.BOND, "BOND-ID", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
     }
 
@@ -162,7 +170,7 @@ contract TokenizationFactoryTest is BaseTest {
 
     function test_getDeploymentByIndex_success() public {
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "IDX-001", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "IDX-001", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeploymentByIndex(0);
         assertEq(rec.issuerId, "IDX-001");
@@ -181,11 +189,11 @@ contract TokenizationFactoryTest is BaseTest {
     function test_totalDeployments_incrementsCorrectly() public {
         assertEq(factory.totalDeployments(), 0);
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "T1", "Token1", "T1", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "T1", "Token1", "T1", issuerOnchainID, tokenAdmin, noLimits
         );
         assertEq(factory.totalDeployments(), 1);
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "T2", "Token2", "T2", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "T2", "Token2", "T2", issuerOnchainID, tokenAdmin, noLimits
         );
         assertEq(factory.totalDeployments(), 2);
     }
@@ -224,7 +232,7 @@ contract TokenizationFactoryTest is BaseTest {
 
         vm.prank(deployer);
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "GRANTED-01", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "GRANTED-01", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
         assertEq(factory.totalDeployments(), 1);
     }
@@ -237,7 +245,7 @@ contract TokenizationFactoryTest is BaseTest {
         vm.prank(deployer);
         vm.expectRevert();
         factory.deployToken(
-            TokenizationFactory.TokenType.SECURITY, "REVOKED-01", "Name", "SYM", address(0), tokenAdmin, noLimits
+            TokenizationFactory.TokenType.SECURITY, "REVOKED-01", "Name", "SYM", issuerOnchainID, tokenAdmin, noLimits
         );
     }
 
@@ -253,7 +261,7 @@ contract TokenizationFactoryTest is BaseTest {
         // Deploy a token so there's a live IdentityRegistry proxy
         factory.deployToken(
             TokenizationFactory.TokenType.SECURITY, "UPG-001", "Upgrade Test", "UPG",
-            address(0), tokenAdmin, noLimits
+            issuerOnchainID, tokenAdmin, noLimits
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("UPG-001");
         IdentityRegistry existingIR = IdentityRegistry(rec.identityRegistry);
@@ -284,7 +292,7 @@ contract TokenizationFactoryTest is BaseTest {
         // Deploy a new token — its IR proxy will use V2 automatically
         factory.deployToken(
             TokenizationFactory.TokenType.SECURITY, "UPG-002", "Post-Upgrade", "PUG",
-            address(0), tokenAdmin, noLimits
+            issuerOnchainID, tokenAdmin, noLimits
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("UPG-002");
 
@@ -294,7 +302,7 @@ contract TokenizationFactoryTest is BaseTest {
     function test_upgrade_doesNotAffectOtherBeacons() public {
         factory.deployToken(
             TokenizationFactory.TokenType.SECURITY, "CROSS-001", "Cross Test", "CRS",
-            address(0), tokenAdmin, noLimits
+            issuerOnchainID, tokenAdmin, noLimits
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("CROSS-001");
 

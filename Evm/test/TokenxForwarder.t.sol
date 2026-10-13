@@ -28,7 +28,7 @@ contract TokenxForwarderTest is BaseTest {
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
     );
     bytes32 constant REQUEST_TYPEHASH = keccak256(
-        "ForwardRequest(address from,address to,uint256 value,uint256 gas,uint256 nonce,bytes data)"
+        "ForwardRequest(address from,address to,uint256 value,uint256 gas,uint256 nonce,uint256 deadline,bytes data)"
     );
 
     function setUp() public {
@@ -63,12 +63,13 @@ contract TokenxForwarderTest is BaseTest {
         bytes memory data
     ) internal view returns (TokenxForwarder.ForwardRequest memory req, bytes memory sig) {
         req = TokenxForwarder.ForwardRequest({
-            from:  from,
-            to:    to,
-            value: 0,
-            gas:   200_000,
-            nonce: forwarder.getNonce(from),
-            data:  data
+            from:     from,
+            to:       to,
+            value:    0,
+            gas:      200_000,
+            nonce:    forwarder.getNonce(from),
+            deadline: block.timestamp + 1 hours,
+            data:     data
         });
 
         bytes32 structHash = keccak256(abi.encode(
@@ -78,6 +79,7 @@ contract TokenxForwarderTest is BaseTest {
             req.value,
             req.gas,
             req.nonce,
+            req.deadline,
             keccak256(req.data)
         ));
 
@@ -141,17 +143,18 @@ contract TokenxForwarderTest is BaseTest {
     function test_wrong_nonce_reverts() public {
         bytes memory data = abi.encodeCall(SecurityToken.mint, (investor, 1e18));
         TokenxForwarder.ForwardRequest memory req = TokenxForwarder.ForwardRequest({
-            from:  tokenAdmin,
-            to:    address(token),
-            value: 0,
-            gas:   200_000,
-            nonce: 99,    // wrong nonce
-            data:  data
+            from:     tokenAdmin,
+            to:       address(token),
+            value:    0,
+            gas:      200_000,
+            nonce:    99,    // wrong nonce
+            deadline: block.timestamp + 1 hours,
+            data:     data
         });
 
         bytes32 structHash = keccak256(abi.encode(
             REQUEST_TYPEHASH,
-            req.from, req.to, req.value, req.gas, req.nonce, keccak256(req.data)
+            req.from, req.to, req.value, req.gas, req.nonce, req.deadline, keccak256(req.data)
         ));
         bytes32 domainSep = keccak256(abi.encode(
             DOMAIN_TYPEHASH,
@@ -185,17 +188,18 @@ contract TokenxForwarderTest is BaseTest {
         bytes memory data = abi.encodeCall(SecurityToken.mint, (investor, 1e18));
 
         TokenxForwarder.ForwardRequest memory req = TokenxForwarder.ForwardRequest({
-            from:  tokenAdmin,    // claims to be admin
-            to:    address(token),
-            value: 0,
-            gas:   200_000,
-            nonce: forwarder.getNonce(tokenAdmin),
-            data:  data
+            from:     tokenAdmin,    // claims to be admin
+            to:       address(token),
+            value:    0,
+            gas:      200_000,
+            nonce:    forwarder.getNonce(tokenAdmin),
+            deadline: block.timestamp + 1 hours,
+            data:     data
         });
 
         bytes32 structHash = keccak256(abi.encode(
             REQUEST_TYPEHASH,
-            req.from, req.to, req.value, req.gas, req.nonce, keccak256(req.data)
+            req.from, req.to, req.value, req.gas, req.nonce, req.deadline, keccak256(req.data)
         ));
         bytes32 domainSep = keccak256(abi.encode(
             DOMAIN_TYPEHASH,
@@ -211,6 +215,148 @@ contract TokenxForwarderTest is BaseTest {
         vm.prank(relayer);
         vm.expectRevert("Forwarder: invalid sig or nonce");
         forwarder.execute(req, sig);
+    }
+
+    function test_expired_request_reverts() public {
+        bytes memory data = abi.encodeCall(SecurityToken.mint, (investor, 1e18));
+        TokenxForwarder.ForwardRequest memory req = TokenxForwarder.ForwardRequest({
+            from:     tokenAdmin,
+            to:       address(token),
+            value:    0,
+            gas:      200_000,
+            nonce:    forwarder.getNonce(tokenAdmin),
+            deadline: block.timestamp - 1, // already expired
+            data:     data
+        });
+
+        bytes32 structHash = keccak256(abi.encode(
+            REQUEST_TYPEHASH,
+            req.from, req.to, req.value, req.gas, req.nonce, req.deadline, keccak256(req.data)
+        ));
+        bytes32 domainSep = keccak256(abi.encode(
+            DOMAIN_TYPEHASH,
+            keccak256("TokenxForwarder"),
+            keccak256("1"),
+            block.chainid,
+            address(forwarder)
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSep, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(tokenAdminKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.prank(relayer);
+        vm.expectRevert("Forwarder: request expired");
+        forwarder.execute(req, sig);
+    }
+
+    function test_invalidate_nonce() public {
+        assertEq(forwarder.getNonce(tokenAdmin), 0);
+
+        vm.prank(tokenAdmin);
+        forwarder.invalidateNonce(5);
+        assertEq(forwarder.getNonce(tokenAdmin), 5);
+
+        // Sign with nonce 0 now fails
+        bytes memory data = abi.encodeCall(SecurityToken.mint, (investor, 1e18));
+        TokenxForwarder.ForwardRequest memory req = TokenxForwarder.ForwardRequest({
+            from:     tokenAdmin,
+            to:       address(token),
+            value:    0,
+            gas:      200_000,
+            nonce:    0,
+            deadline: block.timestamp + 1 hours,
+            data:     data
+        });
+        bytes32 structHash = keccak256(abi.encode(
+            REQUEST_TYPEHASH,
+            req.from, req.to, req.value, req.gas, req.nonce, req.deadline, keccak256(req.data)
+        ));
+        bytes32 domainSep = keccak256(abi.encode(
+            DOMAIN_TYPEHASH,
+            keccak256("TokenxForwarder"),
+            keccak256("1"),
+            block.chainid,
+            address(forwarder)
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSep, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(tokenAdminKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.prank(relayer);
+        vm.expectRevert("Forwarder: invalid sig or nonce");
+        forwarder.execute(req, sig);
+    }
+
+    function test_invalid_target_reverts() public {
+        bytes memory data = abi.encodeCall(SecurityToken.mint, (investor, 1e18));
+        TokenxForwarder.ForwardRequest memory req = TokenxForwarder.ForwardRequest({
+            from:     tokenAdmin,
+            to:       address(0),
+            value:    0,
+            gas:      200_000,
+            nonce:    forwarder.getNonce(tokenAdmin),
+            deadline: block.timestamp + 1 hours,
+            data:     data
+        });
+        bytes32 structHash = keccak256(abi.encode(
+            REQUEST_TYPEHASH,
+            req.from, req.to, req.value, req.gas, req.nonce, req.deadline, keccak256(req.data)
+        ));
+        bytes32 domainSep = keccak256(abi.encode(
+            DOMAIN_TYPEHASH,
+            keccak256("TokenxForwarder"),
+            keccak256("1"),
+            block.chainid,
+            address(forwarder)
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSep, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(tokenAdminKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.prank(relayer);
+        vm.expectRevert("Forwarder: zero target");
+        forwarder.execute(req, sig);
+    }
+
+    function test_value_mismatch_reverts() public {
+        bytes memory data = abi.encodeCall(SecurityToken.mint, (investor, 1e18));
+        TokenxForwarder.ForwardRequest memory req = TokenxForwarder.ForwardRequest({
+            from:     tokenAdmin,
+            to:       address(token),
+            value:    1 ether,
+            gas:      200_000,
+            nonce:    forwarder.getNonce(tokenAdmin),
+            deadline: block.timestamp + 1 hours,
+            data:     data
+        });
+        bytes32 structHash = keccak256(abi.encode(
+            REQUEST_TYPEHASH,
+            req.from, req.to, req.value, req.gas, req.nonce, req.deadline, keccak256(req.data)
+        ));
+        bytes32 domainSep = keccak256(abi.encode(
+            DOMAIN_TYPEHASH,
+            keccak256("TokenxForwarder"),
+            keccak256("1"),
+            block.chainid,
+            address(forwarder)
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSep, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(tokenAdminKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        // Relayer sends 0 value when req.value is 1 ether
+        vm.prank(relayer);
+        vm.expectRevert("Forwarder: value mismatch");
+        forwarder.execute{value: 0}(req, sig);
+    }
+
+    function test_rescue_eth() public {
+        vm.deal(address(forwarder), 1 ether);
+        address recipient = makeAddr("recipient");
+
+        vm.prank(tokenAdmin);
+        forwarder.rescueETH(payable(recipient), 1 ether);
+        assertEq(recipient.balance, 1 ether);
     }
 
     function test_direct_call_without_forwarder_still_works() public {

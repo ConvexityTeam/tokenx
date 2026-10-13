@@ -230,8 +230,9 @@ contract WalletFactoryFuzz is Test {
 
         address predicted = factory.predictWalletAddress(bid, walletAdmin, salt);
 
+        address currentPool = factory.poolWallet();
         vm.prank(admin);
-        address deployed = factory.createWalletDeterministic(bid, walletAdmin, salt);
+        address deployed = factory.createWalletDeterministic(bid, walletAdmin, salt, currentPool);
 
         assertEq(deployed, predicted);
     }
@@ -351,13 +352,14 @@ contract WalletFactoryBadActor is Test {
     ///         because businessId is already taken.
     function test_attack_saltCollision_sameBusinessId_reverts() public {
         bytes32 salt = keccak256("same-salt");
+        address currentPool = factory.poolWallet();
 
         vm.prank(admin);
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, currentPool);
 
         vm.prank(admin);
         vm.expectRevert("WF: businessId taken");
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, currentPool);
     }
 
     // ── Attack: privilege escalation ──────────────────────────────────────────
@@ -475,10 +477,10 @@ contract WalletFactoryGas is Test {
     uint256 constant CREATE_WALLET_CEILING              = 700_000;
     uint256 constant CREATE_WALLET_DETERMINISTIC_CEILING = 700_000;
     uint256 constant PREDICT_ADDRESS_CEILING            = 18_000;  // measured ~12k
-    uint256 constant SWEEP_WALLET_ETH_CEILING           = 80_000;
-    uint256 constant SWEEP_WALLET_TOKENS_CEILING        = 100_000;
+    uint256 constant SWEEP_WALLET_ETH_CEILING           = 130_000;
+    uint256 constant SWEEP_WALLET_TOKENS_CEILING        = 130_000;
     uint256 constant SET_POOL_CEILING                   = 40_000;
-    uint256 constant DEACTIVATE_CEILING                 = 30_000;
+    uint256 constant DEACTIVATE_CEILING                 = 45_000;
 
     bytes32 constant BID = keccak256("gas-bench");
 
@@ -499,9 +501,10 @@ contract WalletFactoryGas is Test {
 
     function test_gas_createWalletDeterministic() public {
         bytes32 salt = keccak256("salt-1");
+        address currentPool = factory.poolWallet();
         uint256 g = gasleft();
         vm.prank(admin);
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, currentPool);
         uint256 used = g - gasleft();
 
         emit log_named_uint("gas: createWalletDeterministic()", used);

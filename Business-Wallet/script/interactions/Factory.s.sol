@@ -65,7 +65,7 @@ contract CreateWalletDeterministic is Script {
         console.log("Predicted address:", predicted);
 
         vm.startBroadcast();
-        address wallet = factory.createWalletDeterministic(businessId, admin, salt);
+        address wallet = factory.createWalletDeterministic(businessId, admin, salt, factory.poolWallet());
         vm.stopBroadcast();
 
         console.log("Deployed wallet  :", wallet);

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "./IERC3643.sol";
 
@@ -18,9 +19,10 @@ import "./IERC3643.sol";
  *   _msgSender() so a relayer can submit signed KYC ops on behalf of
  *   an agent who holds no ETH.
  */
-contract IdentityRegistry is IIdentityRegistry, AccessControl, Initializable {
+contract IdentityRegistry is IIdentityRegistry, AccessControl, Pausable, Initializable {
 
-    bytes32 public constant AGENT_ROLE = keccak256("AGENT_ROLE");
+    bytes32 public constant AGENT_ROLE  = keccak256("AGENT_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
     // ── EIP-2771 ──────────────────────────────────────────────────
     address public trustedForwarder;
@@ -30,6 +32,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl, Initializable {
         address onchainID;
         uint16  country;
         bool    verified;
+        bool    registered;
     }
 
     mapping(address => Identity) private _identities;
@@ -52,6 +55,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl, Initializable {
         trustedForwarder = trustedForwarder_;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(AGENT_ROLE,         admin);
+        _grantRole(PAUSER_ROLE,        admin);
     }
 
     // ── EIP-2771 context ──────────────────────────────────────────
@@ -91,23 +95,26 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl, Initializable {
         return _identities[wallet].country;
     }
 
+    function pause()   external onlyRole(PAUSER_ROLE) { _pause(); }
+    function unpause() external onlyRole(PAUSER_ROLE) { _unpause(); }
+
     function registerIdentity(
         address wallet,
         address onchainID,
         uint16  country
-    ) external override onlyRole(AGENT_ROLE) {
-        require(wallet != address(0),              "IR: zero wallet");
-        require(_identities[wallet].country == 0,  "IR: already registered");
+    ) external override onlyRole(AGENT_ROLE) whenNotPaused {
+        require(wallet != address(0),               "IR: zero wallet");
+        require(!_identities[wallet].registered,   "IR: already registered");
 
-        _identities[wallet] = Identity({ onchainID: onchainID, country: country, verified: true });
+        _identities[wallet] = Identity({ onchainID: onchainID, country: country, verified: true, registered: true });
         _investors.push(wallet);
         _investorIndex[wallet] = _investors.length;
 
         emit IdentityRegistered(wallet, onchainID);
     }
 
-    function deleteIdentity(address wallet) external override onlyRole(AGENT_ROLE) {
-        require(_identities[wallet].country != 0, "IR: not registered");
+    function deleteIdentity(address wallet) external override onlyRole(AGENT_ROLE) whenNotPaused {
+        require(_identities[wallet].registered, "IR: not registered");
 
         uint256 idx  = _investorIndex[wallet] - 1;
         address last = _investors[_investors.length - 1];
@@ -122,20 +129,20 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl, Initializable {
         emit IdentityRemoved(wallet, id);
     }
 
-    function updateCountry(address wallet, uint16 country) external override onlyRole(AGENT_ROLE) {
-        require(_identities[wallet].country != 0, "IR: not registered");
+    function updateCountry(address wallet, uint16 country) external override onlyRole(AGENT_ROLE) whenNotPaused {
+        require(_identities[wallet].registered, "IR: not registered");
         _identities[wallet].country = country;
         emit CountryUpdated(wallet, country);
     }
 
-    function updateIdentity(address wallet, address newOnchainID) external override onlyRole(AGENT_ROLE) {
-        require(_identities[wallet].country != 0, "IR: not registered");
+    function updateIdentity(address wallet, address newOnchainID) external override onlyRole(AGENT_ROLE) whenNotPaused {
+        require(_identities[wallet].registered, "IR: not registered");
         _identities[wallet].onchainID = newOnchainID;
         emit IdentityRegistered(wallet, newOnchainID);
     }
 
-    function setVerified(address wallet, bool verified) external onlyRole(AGENT_ROLE) {
-        require(_identities[wallet].country != 0, "IR: not registered");
+    function setVerified(address wallet, bool verified) external onlyRole(AGENT_ROLE) whenNotPaused {
+        require(_identities[wallet].registered, "IR: not registered");
         _identities[wallet].verified = verified;
         emit InvestorVerified(wallet, verified);
     }
@@ -149,7 +156,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl, Initializable {
     {
         uint256 total = _investors.length;
         if (offset >= total) return result;
-        uint256 end = offset + limit > total ? total : offset + limit;
+        uint256 end = (limit > total - offset) ? total : offset + limit;
         result = new address[](end - offset);
         for (uint256 i = offset; i < end; i++) {
             result[i - offset] = _investors[i];

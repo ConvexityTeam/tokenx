@@ -161,9 +161,11 @@ contract BWHandler is Test {
         }
     }
 
-    // Update pool wallet to a new address (must stay non-zero)
+    // Update pool wallet to a new address (must stay non-zero and accept ETH)
     function setPool(address newPool) external {
-        if (newPool == address(0)) return;
+        if (newPool == address(0) || newPool == address(wallet) || uint160(newPool) <= 0xff || newPool.code.length > 0) return;
+        (bool canReceive,) = newPool.call{value: 0}("");
+        if (!canReceive) return;
         vm.prank(admin);
         wallet.setPoolWallet(newPool);
         pool = newPool;
@@ -767,7 +769,7 @@ contract BusinessWalletGas is Test {
 
     // Upper-bound gas ceilings — set 30% above measured baseline.
     // Adjust after intentional optimisation; failing here signals a regression.
-    uint256 constant RECEIVE_ETH_CEILING         = 85_000;   // measured ~63k
+    uint256 constant RECEIVE_ETH_CEILING         = 120_000;  // measured ~106k with nonReentrant
     uint256 constant NOTIFY_SINGLE_TOKEN_CEILING = 100_000;  // measured ~69k
     uint256 constant SWEEP_SINGLE_TOKEN_CEILING  = 110_000;  // measured ~76k
     uint256 constant BATCH_SWEEP_10_CEILING      = 500_000;  // measured ~350k
@@ -880,7 +882,7 @@ contract BusinessWalletGas is Test {
         uint256 used = g - gasleft();
 
         emit log_named_uint("gas: sweepETH()", used);
-        assertLt(used, 85_000, "sweepETH() regressed beyond ceiling"); // measured ~64k
+        assertLt(used, 120_000, "sweepETH() regressed beyond ceiling"); // measured ~98k with nonReentrant
     }
 }
 

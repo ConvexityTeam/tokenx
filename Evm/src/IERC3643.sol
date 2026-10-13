@@ -31,6 +31,7 @@ interface ICompliance {
     function transferred(address _from, address _to, uint256 _amount) external;
     function created(address _to, uint256 _amount) external;
     function destroyed(address _from, uint256 _amount) external;
+    function recovered(address _oldWallet, address _newWallet, uint256 _amount) external;
     function bindToken(address _token) external;
 
     event TokenBound(address indexed token);
@@ -109,6 +110,6 @@ interface IERC3643 {
     event AddressFrozen(address indexed userAddress, bool indexed isFrozen, address indexed owner);
     event TokensFrozen(address indexed userAddress, uint256 amount);
     event TokensUnfrozen(address indexed userAddress, uint256 amount);
-    event Paused(address indexed userAddress);
-    event Unpaused(address indexed userAddress);
+    event Paused(address userAddress);
+    event Unpaused(address userAddress);
 }

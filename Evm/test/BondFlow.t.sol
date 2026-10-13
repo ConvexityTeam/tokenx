@@ -6,16 +6,16 @@ import "./helpers/BaseTest.sol";
 
 // Minimal ERC-20 used for coupon and principal payouts in tests.
 contract MockUSDC {
-    string public name   = "Mock USDC";
+    string public name = "Mock USDC";
     string public symbol = "USDC";
-    uint8  public decimals = 6;
+    uint8 public decimals = 6;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
     uint256 public totalSupply;
 
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
-        totalSupply   += amount;
+        totalSupply += amount;
     }
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
@@ -23,13 +23,17 @@ contract MockUSDC {
     }
     function transfer(address to, uint256 amount) external returns (bool) {
         balanceOf[msg.sender] -= amount;
-        balanceOf[to]         += amount;
+        balanceOf[to] += amount;
         return true;
     }
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
         allowance[from][msg.sender] -= amount;
-        balanceOf[from]             -= amount;
-        balanceOf[to]               += amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
         return true;
     }
 }
@@ -52,12 +56,12 @@ contract BondFlowTest is BaseTest {
 
     MockUSDC usdc;
 
-    address admin      = address(this);
+    address admin = address(this);
     address tokenAdmin = address(this);
-    address alice      = address(0xA11CE);
-    address bob        = address(0xB0B);
-    address charlie    = address(0xC4A);
-    address nobody     = address(0xDEAD);
+    address alice = address(0xA11CE);
+    address bob = address(0xB0B);
+    address charlie = address(0xC4A);
+    address nobody = address(0xDEAD);
 
     uint16 constant COUNTRY_NG = 566;
 
@@ -65,28 +69,29 @@ contract BondFlowTest is BaseTest {
     uint256 MATURITY;
     uint256 FIRST_COUPON;
     uint256 constant COUPON_PERIOD = 90 days;
-    uint256 constant RATE_BPS      = 500;          // 5.00%
+    uint256 constant RATE_BPS = 500; // 5.00%
     // `principal = balance * faceValuePerToken / 1e18`. balance is 18-dec ERC20,
     // so faceValuePerToken must be denominated in the payoutToken's decimals.
     // For USDC (6 decimals), $100 face → 100e6.
-    uint256 constant FACE          = 100e6;
+    uint256 constant FACE = 100e6;
 
     // Deployed suite (populated in setUp)
-    IdentityRegistry  registry;
-    ComplianceModule  compliance;
-    SecurityToken     token;
-    YieldDistributor  distributor;
-    BondTerms         terms;
-    TokenizationFactory.ComplianceParams noLimits = TokenizationFactory.ComplianceParams({
-        maxShareholders: 0,
-        maxTokensPerInvestor: 0,
-        lockUpDuration: 0
-    });
+    IdentityRegistry registry;
+    ComplianceModule compliance;
+    SecurityToken token;
+    YieldDistributor distributor;
+    BondTerms terms;
+    TokenizationFactory.ComplianceParams noLimits =
+        TokenizationFactory.ComplianceParams({
+            maxShareholders: 0,
+            maxTokensPerInvestor: 0,
+            lockUpDuration: 0
+        });
 
     function setUp() public {
         vm.warp(1_700_000_000);
-        ISSUE        = block.timestamp;
-        MATURITY     = ISSUE + 5 * 365 days;
+        ISSUE = block.timestamp;
+        MATURITY = ISSUE + 5 * 365 days;
         FIRST_COUPON = ISSUE + COUPON_PERIOD;
 
         _deployBeacons();
@@ -99,20 +104,21 @@ contract BondFlowTest is BaseTest {
     // ── Helpers ────────────────────────────────────────────────────
 
     function _bondParams() internal view returns (BondTerms.InitParams memory) {
-        return BondTerms.InitParams({
-            annualRateBps:        RATE_BPS,
-            couponPeriodSeconds:  COUPON_PERIOD,
-            dayCount:             BondTerms.DayCount.ACT_365,
-            issueDate:            ISSUE,
-            maturityDate:         MATURITY,
-            firstCouponDate:      FIRST_COUPON,
-            faceValuePerToken:    FACE,
-            gracePeriodSeconds:   7 days,
-            callable:                false,
-            callDate:                0,
-            admin:                   tokenAdmin,
-            earlyRedemptionFeeBps:   0
-        });
+        return
+            BondTerms.InitParams({
+                annualRateBps: RATE_BPS,
+                couponPeriodSeconds: COUPON_PERIOD,
+                dayCount: BondTerms.DayCount.ACT_365,
+                issueDate: ISSUE,
+                maturityDate: MATURITY,
+                firstCouponDate: FIRST_COUPON,
+                faceValuePerToken: FACE,
+                gracePeriodSeconds: 7 days,
+                callable: false,
+                callDate: 0,
+                admin: tokenAdmin,
+                earlyRedemptionFeeBps: 0
+            });
     }
 
     function _deployBond(string memory issuerId) internal {
@@ -120,28 +126,30 @@ contract BondFlowTest is BaseTest {
             issuerId,
             "Acme Bond 5y",
             "ACMB5",
-            address(0),
+            address(0x101),
             tokenAdmin,
             noLimits,
             _bondParams()
         );
-        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(issuerId);
-        token       = SecurityToken(payable(t));
-        terms       = BondTerms(bt);
-        registry    = IdentityRegistry(rec.identityRegistry);
-        compliance  = ComplianceModule(rec.compliance);
+        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(
+            issuerId
+        );
+        token = SecurityToken(payable(t));
+        terms = BondTerms(bt);
+        registry = IdentityRegistry(rec.identityRegistry);
+        compliance = ComplianceModule(rec.compliance);
         distributor = YieldDistributor(payable(rec.yieldDistributor));
     }
 
     function _registerThree() internal {
-        registry.registerIdentity(alice,   address(0x1001), COUNTRY_NG);
-        registry.registerIdentity(bob,     address(0x1002), COUNTRY_NG);
+        registry.registerIdentity(alice, address(0x1001), COUNTRY_NG);
+        registry.registerIdentity(bob, address(0x1002), COUNTRY_NG);
         registry.registerIdentity(charlie, address(0x1003), COUNTRY_NG);
     }
 
     function _mintAll(uint256 a, uint256 b, uint256 c) internal {
-        if (a > 0) token.mint(alice,   a);
-        if (b > 0) token.mint(bob,     b);
+        if (a > 0) token.mint(alice, a);
+        if (b > 0) token.mint(bob, b);
         if (c > 0) token.mint(charlie, c);
     }
 
@@ -156,27 +164,32 @@ contract BondFlowTest is BaseTest {
     // ── Factory: deployBond happy path ─────────────────────────────
 
     function test_deployBond_recordCorrect() public view {
-        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("BOND-001");
-        assertEq(rec.token,            address(token));
-        assertEq(rec.bondTerms,        address(terms));
+        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(
+            "BOND-001"
+        );
+        assertEq(rec.token, address(token));
+        assertEq(rec.bondTerms, address(terms));
         assertEq(rec.yieldDistributor, address(distributor));
-        assertEq(rec.compliance,       address(compliance));
+        assertEq(rec.compliance, address(compliance));
         assertEq(rec.identityRegistry, address(registry));
-        assertEq(uint256(rec.tokenType), uint256(TokenizationFactory.TokenType.BOND));
+        assertEq(
+            uint256(rec.tokenType),
+            uint256(TokenizationFactory.TokenType.BOND)
+        );
     }
 
     function test_deployBond_wiresBondTermsIntoConsumers() public view {
-        assertEq(address(token.bondTerms()),       address(terms));
+        assertEq(address(token.bondTerms()), address(terms));
         assertEq(address(distributor.bondTerms()), address(terms));
-        assertEq(terms.securityToken(),            address(token));
-        assertEq(terms.yieldDistributor(),         address(distributor));
+        assertEq(terms.securityToken(), address(token));
+        assertEq(terms.yieldDistributor(), address(distributor));
     }
 
     function test_deployBond_termsSealed() public view {
-        assertEq(terms.annualRateBps(),     RATE_BPS);
-        assertEq(terms.maturityDate(),      MATURITY);
+        assertEq(terms.annualRateBps(), RATE_BPS);
+        assertEq(terms.maturityDate(), MATURITY);
         assertEq(terms.faceValuePerToken(), FACE);
-        assertEq(terms.nextCouponDate(),    FIRST_COUPON);
+        assertEq(terms.nextCouponDate(), FIRST_COUPON);
     }
 
     function test_deployBond_factoryRoleRenounced() public view {
@@ -192,7 +205,12 @@ contract BondFlowTest is BaseTest {
         vm.expectRevert("Factory: use deployBond for BOND");
         factory.deployToken(
             TokenizationFactory.TokenType.BOND,
-            "ROGUE-BOND", "X", "X", address(0), tokenAdmin, noLimits
+            "ROGUE-BOND",
+            "X",
+            "X",
+            address(0x101),
+            tokenAdmin,
+            noLimits
         );
     }
 
@@ -200,7 +218,15 @@ contract BondFlowTest is BaseTest {
         BondTerms.InitParams memory bad = _bondParams();
         bad.maturityDate = bad.issueDate;
         vm.expectRevert("BT: maturity <= issue");
-        factory.deployBond("BAD-BOND", "X", "X", address(0), tokenAdmin, noLimits, bad);
+        factory.deployBond(
+            "BAD-BOND",
+            "X",
+            "X",
+            address(0x101),
+            tokenAdmin,
+            noLimits,
+            bad
+        );
     }
 
     // ── setBondTerms guards ────────────────────────────────────────
@@ -212,7 +238,13 @@ contract BondFlowTest is BaseTest {
 
     function testRevert_setBondTerms_zeroAddress() public {
         // Deploy a standalone SecurityToken to verify the zero-check
-        SecurityToken fresh = _makeST("F", "F", address(registry), address(compliance), admin);
+        SecurityToken fresh = _makeST(
+            "F",
+            "F",
+            address(registry),
+            address(compliance),
+            admin
+        );
         vm.expectRevert("ST: zero bond terms");
         fresh.setBondTerms(address(0));
     }
@@ -225,18 +257,30 @@ contract BondFlowTest is BaseTest {
         usdc.mint(admin, 100_000e6);
         usdc.approve(address(distributor), type(uint256).max);
         vm.expectRevert("YD: coupon not due");
-        distributor.createScheduledCoupon(_investorList(), address(usdc), 30 days, "C1");
+        distributor.createScheduledCoupon(
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
+        );
     }
 
     function testRevert_createScheduledCoupon_noBondTerms() public {
         // Deploy a YIELD_BEARING (no bond) suite — should reject scheduled coupons
         address t = factory.deployToken(
             TokenizationFactory.TokenType.YIELD_BEARING,
-            "YB-001", "Yieldy", "YB", address(0), tokenAdmin, noLimits
+            "YB-001",
+            "Yieldy",
+            "YB",
+            address(0x101),
+            tokenAdmin,
+            noLimits
         );
-        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("YB-001");
+        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(
+            "YB-001"
+        );
         YieldDistributor yd = YieldDistributor(payable(rec.yieldDistributor));
-        IdentityRegistry  ir2 = IdentityRegistry(rec.identityRegistry);
+        IdentityRegistry ir2 = IdentityRegistry(rec.identityRegistry);
         ir2.registerIdentity(alice, address(0x1001), COUNTRY_NG);
         SecurityToken(payable(t)).mint(alice, 100 ether);
 
@@ -250,56 +294,75 @@ contract BondFlowTest is BaseTest {
 
     function test_createScheduledCoupon_paysCorrectAmount_usdc() public {
         _registerThree();
-        _mintAll(500 ether, 300 ether, 200 ether);  // 1000 ether eligible
+        _mintAll(500 ether, 300 ether, 200 ether); // 1000 ether eligible
         usdc.mint(admin, 100_000e6);
         usdc.approve(address(distributor), type(uint256).max);
 
         vm.warp(FIRST_COUPON);
-        uint256 perToken     = terms.couponPerToken();
-        uint256 totalCoupon  = perToken * 1000 ether / 1e18;
+        uint256 perToken = terms.couponPerToken();
+        uint256 totalCoupon = (perToken * 1000 ether) / 1e18;
 
         uint256 distributorBalBefore = usdc.balanceOf(address(distributor));
         uint256 snapshotId = distributor.createScheduledCoupon(
-            _investorList(), address(usdc), 30 days, "C1"
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
         );
 
         // Distributor received exactly the required amount
-        assertEq(usdc.balanceOf(address(distributor)) - distributorBalBefore, totalCoupon);
+        assertEq(
+            usdc.balanceOf(address(distributor)) - distributorBalBefore,
+            totalCoupon
+        );
 
         // Snapshot is recorded as scheduled
-        YieldDistributor.Snapshot memory snap = distributor.getSnapshot(snapshotId);
+        YieldDistributor.Snapshot memory snap = distributor.getSnapshot(
+            snapshotId
+        );
         assertTrue(snap.scheduled);
-        assertEq(snap.totalFunds,          totalCoupon);
+        assertEq(snap.totalFunds, totalCoupon);
         assertEq(snap.totalEligibleSupply, 1000 ether);
 
         // nextCouponDate advanced
         assertEq(terms.nextCouponDate(), FIRST_COUPON + COUPON_PERIOD);
     }
 
-    function test_createScheduledCoupon_ethPayout_requiresExactMsgValue() public {
+    function test_createScheduledCoupon_ethPayout_requiresExactMsgValue()
+        public
+    {
         _registerThree();
         _mintAll(500 ether, 300 ether, 200 ether);
 
         vm.warp(FIRST_COUPON);
-        uint256 perToken    = terms.couponPerToken();
-        uint256 totalCoupon = perToken * 1000 ether / 1e18;
+        uint256 perToken = terms.couponPerToken();
+        uint256 totalCoupon = (perToken * 1000 ether) / 1e18;
 
         // Too little
         vm.deal(admin, totalCoupon * 2);
         vm.expectRevert("YD: wrong ETH amount");
         distributor.createScheduledCoupon{value: totalCoupon - 1}(
-            _investorList(), address(0), 30 days, "C1"
+            _investorList(),
+            address(0),
+            30 days,
+            "C1"
         );
 
         // Too much
         vm.expectRevert("YD: wrong ETH amount");
         distributor.createScheduledCoupon{value: totalCoupon + 1}(
-            _investorList(), address(0), 30 days, "C1"
+            _investorList(),
+            address(0),
+            30 days,
+            "C1"
         );
 
         // Exact
         distributor.createScheduledCoupon{value: totalCoupon}(
-            _investorList(), address(0), 30 days, "C1"
+            _investorList(),
+            address(0),
+            30 days,
+            "C1"
         );
         assertEq(address(distributor).balance, totalCoupon);
     }
@@ -313,7 +376,12 @@ contract BondFlowTest is BaseTest {
         vm.warp(FIRST_COUPON);
         vm.deal(admin, 1 ether);
         vm.expectRevert("YD: ETH not allowed");
-        distributor.createScheduledCoupon{value: 1}(_investorList(), address(usdc), 30 days, "C1");
+        distributor.createScheduledCoupon{value: 1}(
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
+        );
     }
 
     function test_createScheduledCoupon_emitsScheduledEvent() public {
@@ -329,7 +397,12 @@ contract BondFlowTest is BaseTest {
         // so we have to filter on the distributor's address.
         vm.expectEmit(true, false, false, true, address(distributor));
         emit YieldDistributor.ScheduledCouponCreated(1, perToken, FIRST_COUPON);
-        distributor.createScheduledCoupon(_investorList(), address(usdc), 30 days, "C1");
+        distributor.createScheduledCoupon(
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
+        );
     }
 
     function testRevert_createScheduledCoupon_afterDefault() public {
@@ -345,7 +418,12 @@ contract BondFlowTest is BaseTest {
         // After default isCouponDue() returns false, so the first guard trips.
         // Either revert message is acceptable — both express "coupons stopped".
         vm.expectRevert("YD: coupon not due");
-        distributor.createScheduledCoupon(_investorList(), address(usdc), 30 days, "C1");
+        distributor.createScheduledCoupon(
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
+        );
     }
 
     // ── flagDefault ────────────────────────────────────────────────
@@ -391,9 +469,16 @@ contract BondFlowTest is BaseTest {
         // Same drill: a non-bond yield distributor doesn't support flagDefault
         factory.deployToken(
             TokenizationFactory.TokenType.YIELD_BEARING,
-            "YB-FD", "Y", "Y", address(0), tokenAdmin, noLimits
+            "YB-FD",
+            "Y",
+            "Y",
+            address(0x101),
+            tokenAdmin,
+            noLimits
         );
-        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("YB-FD");
+        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(
+            "YB-FD"
+        );
         YieldDistributor yd = YieldDistributor(payable(rec.yieldDistributor));
         vm.expectRevert("YD: no bond terms");
         yd.flagDefault();
@@ -408,35 +493,45 @@ contract BondFlowTest is BaseTest {
         usdc.approve(address(distributor), type(uint256).max);
 
         // Turn on wallet allowlist, only allow alice and charlie
-        compliance.setWalletAllowed(alice,   true);
+        compliance.setWalletAllowed(alice, true);
         compliance.setWalletAllowed(charlie, true);
         compliance.setWalletAllowlistEnabled(true);
 
         vm.warp(FIRST_COUPON);
-        uint256 perToken    = terms.couponPerToken();
+        uint256 perToken = terms.couponPerToken();
         // bob (300 ether) excluded → eligible supply = 700 ether
-        uint256 expected    = perToken * 700 ether / 1e18;
+        uint256 expected = (perToken * 700 ether) / 1e18;
 
-        uint256 snapId = distributor.createScheduledCoupon(_investorList(), address(usdc), 30 days, "C1");
+        uint256 snapId = distributor.createScheduledCoupon(
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
+        );
         YieldDistributor.Snapshot memory snap = distributor.getSnapshot(snapId);
         assertEq(snap.totalEligibleSupply, 700 ether);
-        assertEq(snap.totalFunds,          expected);
+        assertEq(snap.totalFunds, expected);
     }
 
     // ── Coupon claim flow ──────────────────────────────────────────
 
     function test_couponClaim_aliceGetsProRataShare() public {
         _registerThree();
-        _mintAll(500 ether, 300 ether, 200 ether);  // 1000 ether eligible
+        _mintAll(500 ether, 300 ether, 200 ether); // 1000 ether eligible
         usdc.mint(admin, 100_000e6);
         usdc.approve(address(distributor), type(uint256).max);
 
         vm.warp(FIRST_COUPON);
-        uint256 snapId = distributor.createScheduledCoupon(_investorList(), address(usdc), 30 days, "C1");
+        uint256 snapId = distributor.createScheduledCoupon(
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
+        );
 
-        uint256 perToken    = terms.couponPerToken();
-        uint256 totalCoupon = perToken * 1000 ether / 1e18;
-        uint256 aliceShare  = totalCoupon * 500 ether / 1000 ether;
+        uint256 perToken = terms.couponPerToken();
+        uint256 totalCoupon = (perToken * 1000 ether) / 1e18;
+        uint256 aliceShare = (totalCoupon * 500 ether) / 1000 ether;
 
         uint256 aliceBalBefore = usdc.balanceOf(alice);
         vm.prank(alice);
@@ -477,11 +572,18 @@ contract BondFlowTest is BaseTest {
         // Use a non-bond suite that has no BondTerms wired
         factory.deployToken(
             TokenizationFactory.TokenType.YIELD_BEARING,
-            "YB-NOBT", "Y", "Y", address(0), tokenAdmin, noLimits
+            "YB-NOBT",
+            "Y",
+            "Y",
+            address(0x101),
+            tokenAdmin,
+            noLimits
         );
-        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("YB-NOBT");
-        SecurityToken    nonBondToken = SecurityToken(payable(rec.token));
-        IdentityRegistry ir2          = IdentityRegistry(rec.identityRegistry);
+        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(
+            "YB-NOBT"
+        );
+        SecurityToken nonBondToken = SecurityToken(payable(rec.token));
+        IdentityRegistry ir2 = IdentityRegistry(rec.identityRegistry);
         ir2.registerIdentity(alice, address(0x1001), COUNTRY_NG);
         nonBondToken.mint(alice, 10 ether);
 
@@ -495,9 +597,9 @@ contract BondFlowTest is BaseTest {
         usdc.mint(address(token), 100_000e6);
 
         vm.warp(MATURITY);
-        uint256 expectedPrincipal = 10 ether * FACE / 1e18;  // 10 * 100 = 1000 (scaled to 1e18)
-        uint256 aliceBalBefore    = usdc.balanceOf(alice);
-        uint256 paid              = token.redeemAtMaturity(alice, address(usdc));
+        uint256 expectedPrincipal = (10 ether * FACE) / 1e18; // 10 * 100 = 1000 (scaled to 1e18)
+        uint256 aliceBalBefore = usdc.balanceOf(alice);
+        uint256 paid = token.redeemAtMaturity(alice, address(usdc));
 
         assertEq(paid, expectedPrincipal);
         assertEq(usdc.balanceOf(alice) - aliceBalBefore, expectedPrincipal);
@@ -510,10 +612,14 @@ contract BondFlowTest is BaseTest {
         usdc.mint(address(token), 100_000e6);
 
         vm.warp(MATURITY);
-        uint256 expectedPrincipal = 10 ether * FACE / 1e18;
+        uint256 expectedPrincipal = (10 ether * FACE) / 1e18;
         // Tx also emits Transfer (burn) and USDC Transfer — filter on token.
         vm.expectEmit(true, false, false, true, address(token));
-        emit SecurityToken.PrincipalRedeemed(alice, 10 ether, expectedPrincipal);
+        emit SecurityToken.PrincipalRedeemed(
+            alice,
+            10 ether,
+            expectedPrincipal
+        );
         token.redeemAtMaturity(alice, address(usdc));
     }
 
@@ -537,7 +643,7 @@ contract BondFlowTest is BaseTest {
         vm.warp(MATURITY);
         token.redeemAtMaturity(alice, address(usdc));
         assertEq(token.balanceOf(alice), 0);
-        assertEq(token.totalSupply(),    5 ether);  // bob still holds
+        assertEq(token.totalSupply(), 5 ether); // bob still holds
         assertFalse(terms.principalRepaid());
     }
 
@@ -551,15 +657,15 @@ contract BondFlowTest is BaseTest {
         vm.warp(MATURITY);
         token.batchRedeemAtMaturity(_investorList(), address(usdc));
 
-        assertEq(token.balanceOf(alice),   0);
-        assertEq(token.balanceOf(bob),     0);
+        assertEq(token.balanceOf(alice), 0);
+        assertEq(token.balanceOf(bob), 0);
         assertEq(token.balanceOf(charlie), 0);
-        assertEq(token.totalSupply(),      0);
+        assertEq(token.totalSupply(), 0);
         assertTrue(terms.principalRepaid());
 
-        assertEq(usdc.balanceOf(alice),   10 ether * FACE / 1e18);
-        assertEq(usdc.balanceOf(bob),      5 ether * FACE / 1e18);
-        assertEq(usdc.balanceOf(charlie),  2 ether * FACE / 1e18);
+        assertEq(usdc.balanceOf(alice), (10 ether * FACE) / 1e18);
+        assertEq(usdc.balanceOf(bob), (5 ether * FACE) / 1e18);
+        assertEq(usdc.balanceOf(charlie), (2 ether * FACE) / 1e18);
     }
 
     function test_batchRedeemAtMaturity_skipsIneligible() public {
@@ -568,15 +674,15 @@ contract BondFlowTest is BaseTest {
         usdc.mint(address(token), 100_000e6);
 
         // Allowlist alice + charlie only — bob skipped silently
-        compliance.setWalletAllowed(alice,   true);
+        compliance.setWalletAllowed(alice, true);
         compliance.setWalletAllowed(charlie, true);
         compliance.setWalletAllowlistEnabled(true);
 
         vm.warp(MATURITY);
         token.batchRedeemAtMaturity(_investorList(), address(usdc));
 
-        assertEq(token.balanceOf(alice),   0);
-        assertEq(token.balanceOf(bob),     5 ether);   // still holds, not redeemed
+        assertEq(token.balanceOf(alice), 0);
+        assertEq(token.balanceOf(bob), 5 ether); // still holds, not redeemed
         assertEq(token.balanceOf(charlie), 0);
         // totalSupply > 0 because bob still holds → bond not sealed
         assertFalse(terms.principalRepaid());
@@ -584,13 +690,13 @@ contract BondFlowTest is BaseTest {
 
     function test_batchRedeemAtMaturity_skipsZeroBalance() public {
         _registerThree();
-        _mintAll(10 ether, 0, 2 ether);  // bob has no tokens but is in the list
+        _mintAll(10 ether, 0, 2 ether); // bob has no tokens but is in the list
         usdc.mint(address(token), 100_000e6);
 
         vm.warp(MATURITY);
         token.batchRedeemAtMaturity(_investorList(), address(usdc));
 
-        assertEq(token.totalSupply(),       0);
+        assertEq(token.totalSupply(), 0);
         assertTrue(terms.principalRepaid());
     }
 
@@ -605,7 +711,10 @@ contract BondFlowTest is BaseTest {
         // 1. First scheduled coupon
         vm.warp(FIRST_COUPON);
         uint256 snapId = distributor.createScheduledCoupon(
-            _investorList(), address(usdc), 30 days, "C1"
+            _investorList(),
+            address(usdc),
+            30 days,
+            "C1"
         );
         assertTrue(distributor.getSnapshot(snapId).scheduled);
 
@@ -622,10 +731,10 @@ contract BondFlowTest is BaseTest {
         vm.warp(MATURITY);
         token.batchRedeemAtMaturity(_investorList(), address(usdc));
 
-        assertEq(token.totalSupply(),  0);
+        assertEq(token.totalSupply(), 0);
         assertTrue(terms.principalRepaid());
         // After principal repayment the bond is fully closed
-        assertFalse(terms.isMatured());  // false because principalRepaid is now true
+        assertFalse(terms.isMatured()); // false because principalRepaid is now true
     }
 
     // ── Gap 1: secondary transfer mid-lifecycle ────────────────────
@@ -636,12 +745,12 @@ contract BondFlowTest is BaseTest {
 
     function test_endToEnd_secondaryTransferAffectsAllocation() public {
         address dave = address(0xDABE);
-        registry.registerIdentity(alice,   address(0x1001), COUNTRY_NG);
-        registry.registerIdentity(bob,     address(0x1002), COUNTRY_NG);
-        registry.registerIdentity(dave,    address(0x1003), COUNTRY_NG);
+        registry.registerIdentity(alice, address(0x1001), COUNTRY_NG);
+        registry.registerIdentity(bob, address(0x1002), COUNTRY_NG);
+        registry.registerIdentity(dave, address(0x1003), COUNTRY_NG);
 
         token.mint(alice, 600 ether);
-        token.mint(bob,   400 ether);
+        token.mint(bob, 400 ether);
 
         // Alice transfers 200 tokens to Dave on the secondary market
         vm.prank(alice);
@@ -657,14 +766,22 @@ contract BondFlowTest is BaseTest {
         usdc.approve(address(distributor), type(uint256).max);
 
         vm.warp(FIRST_COUPON);
-        uint256 snapId = distributor.createScheduledCoupon(investors, address(usdc), 30 days, "C1");
+        uint256 snapId = distributor.createScheduledCoupon(
+            investors,
+            address(usdc),
+            30 days,
+            "C1"
+        );
 
         YieldDistributor.Snapshot memory snap = distributor.getSnapshot(snapId);
         assertEq(snap.totalEligibleSupply, 1000 ether);
 
-        vm.prank(alice);   distributor.claimYield(snapId);
-        vm.prank(bob);     distributor.claimYield(snapId);
-        vm.prank(dave);    distributor.claimYield(snapId);
+        vm.prank(alice);
+        distributor.claimYield(snapId);
+        vm.prank(bob);
+        distributor.claimYield(snapId);
+        vm.prank(dave);
+        distributor.claimYield(snapId);
 
         // Alice and Bob hold equal balances → equal payouts
         assertEq(usdc.balanceOf(alice), usdc.balanceOf(bob));
@@ -694,10 +811,10 @@ contract BondFlowTest is BaseTest {
 
     function test_endToEnd_suspendedInvestorBlockedThenRestored() public {
         registry.registerIdentity(alice, address(0x1001), COUNTRY_NG);
-        registry.registerIdentity(bob,   address(0x1002), COUNTRY_NG);
+        registry.registerIdentity(bob, address(0x1002), COUNTRY_NG);
 
         token.mint(alice, 600 ether);
-        token.mint(bob,   400 ether);
+        token.mint(bob, 400 ether);
 
         usdc.mint(admin, 100_000e6);
         usdc.approve(address(distributor), type(uint256).max);
@@ -707,7 +824,12 @@ contract BondFlowTest is BaseTest {
         investors[1] = bob;
 
         vm.warp(FIRST_COUPON);
-        uint256 snapId = distributor.createScheduledCoupon(investors, address(usdc), 30 days, "C1");
+        uint256 snapId = distributor.createScheduledCoupon(
+            investors,
+            address(usdc),
+            30 days,
+            "C1"
+        );
 
         // Suspend Alice after snapshot — her balance was captured but eligibility
         // is re-evaluated at claim time
@@ -749,15 +871,24 @@ contract BondFlowTest is BaseTest {
             assertTrue(terms.isCouponDue());
 
             uint256 snapId = distributor.createScheduledCoupon(
-                _investorList(), address(usdc), 30 days, string(abi.encodePacked("C", i + 1))
+                _investorList(),
+                address(usdc),
+                30 days,
+                string(abi.encodePacked("C", i + 1))
             );
 
-            vm.prank(alice);   distributor.claimYield(snapId);
-            vm.prank(bob);     distributor.claimYield(snapId);
-            vm.prank(charlie); distributor.claimYield(snapId);
+            vm.prank(alice);
+            distributor.claimYield(snapId);
+            vm.prank(bob);
+            distributor.claimYield(snapId);
+            vm.prank(charlie);
+            distributor.claimYield(snapId);
 
             // nextCouponDate must have advanced
-            assertEq(terms.nextCouponDate(), FIRST_COUPON + (i + 1) * COUPON_PERIOD);
+            assertEq(
+                terms.nextCouponDate(),
+                FIRST_COUPON + (i + 1) * COUPON_PERIOD
+            );
         }
 
         assertEq(distributor.snapshotCount(), 3);
@@ -783,21 +914,30 @@ contract BondFlowTest is BaseTest {
         ethParams.faceValuePerToken = 0.01 ether; // 0.01 ETH par value per token
 
         (address t, address bt) = factory.deployBond(
-            "ETH-BOND-001", "ETH Bond 5y", "ETHB5",
-            address(0), tokenAdmin, noLimits, ethParams
+            "ETH-BOND-001",
+            "ETH Bond 5y",
+            "ETHB5",
+            address(0x101),
+            tokenAdmin,
+            noLimits,
+            ethParams
         );
-        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("ETH-BOND-001");
+        TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(
+            "ETH-BOND-001"
+        );
 
-        SecurityToken   ethToken = SecurityToken(payable(t));
-        BondTerms       ethTerms = BondTerms(bt);
-        YieldDistributor ethDist = YieldDistributor(payable(rec.yieldDistributor));
-        IdentityRegistry ethReg  = IdentityRegistry(rec.identityRegistry);
+        SecurityToken ethToken = SecurityToken(payable(t));
+        BondTerms ethTerms = BondTerms(bt);
+        YieldDistributor ethDist = YieldDistributor(
+            payable(rec.yieldDistributor)
+        );
+        IdentityRegistry ethReg = IdentityRegistry(rec.identityRegistry);
 
         ethReg.registerIdentity(alice, address(0x1001), COUNTRY_NG);
-        ethReg.registerIdentity(bob,   address(0x1002), COUNTRY_NG);
+        ethReg.registerIdentity(bob, address(0x1002), COUNTRY_NG);
 
         ethToken.mint(alice, 10 ether);
-        ethToken.mint(bob,   10 ether); // total 20 ether tokens
+        ethToken.mint(bob, 10 ether); // total 20 ether tokens
 
         address[] memory investors = new address[](2);
         investors[0] = alice;
@@ -805,38 +945,48 @@ contract BondFlowTest is BaseTest {
 
         // ── Coupon in ETH ─────────────────────────────────────────
         vm.warp(FIRST_COUPON);
-        uint256 perToken    = ethTerms.couponPerToken();
-        uint256 totalCoupon = perToken * 20 ether / 1e18;
+        uint256 perToken = ethTerms.couponPerToken();
+        uint256 totalCoupon = (perToken * 20 ether) / 1e18;
 
         vm.deal(admin, totalCoupon * 2);
         uint256 aliceEthBefore = alice.balance;
-        uint256 bobEthBefore   = bob.balance;
+        uint256 bobEthBefore = bob.balance;
 
         ethDist.createScheduledCoupon{value: totalCoupon}(
-            investors, address(0), 30 days, "C1-ETH"
+            investors,
+            address(0),
+            30 days,
+            "C1-ETH"
         );
 
-        vm.prank(alice); ethDist.claimYield(1);
-        vm.prank(bob);   ethDist.claimYield(1);
+        vm.prank(alice);
+        ethDist.claimYield(1);
+        vm.prank(bob);
+        ethDist.claimYield(1);
 
         assertGt(alice.balance, aliceEthBefore);
-        assertGt(bob.balance,   bobEthBefore);
-        assertApproxEqAbs(alice.balance - aliceEthBefore, bob.balance - bobEthBefore, 1);
+        assertGt(bob.balance, bobEthBefore);
+        assertApproxEqAbs(
+            alice.balance - aliceEthBefore,
+            bob.balance - bobEthBefore,
+            1
+        );
 
         // ── Principal in ETH at maturity ──────────────────────────
-        uint256 totalPrincipal = 20 ether * ethParams.faceValuePerToken / 1e18;
+        uint256 totalPrincipal = (20 ether * ethParams.faceValuePerToken) /
+            1e18;
         // Simulate issuer depositing principal into the token contract
         vm.deal(address(ethToken), totalPrincipal);
 
         vm.warp(MATURITY);
         aliceEthBefore = alice.balance;
-        bobEthBefore   = bob.balance;
+        bobEthBefore = bob.balance;
 
         ethToken.batchRedeemAtMaturity(investors, address(0));
 
         assertEq(ethToken.totalSupply(), 0);
         assertTrue(ethTerms.principalRepaid());
         assertGt(alice.balance, aliceEthBefore);
-        assertGt(bob.balance,   bobEthBefore);
+        assertGt(bob.balance, bobEthBefore);
     }
 }

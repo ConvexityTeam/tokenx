@@ -39,11 +39,12 @@ contract TokenxForwarder is EIP712, AccessControl, Pausable, ReentrancyGuard {
         uint256 value;   // ETH to forward (usually 0)
         uint256 gas;     // gas limit for the inner call
         uint256 nonce;   // must equal current on-chain nonce for `from`
+        uint256 deadline;// expiry timestamp
         bytes   data;    // calldata to forward
     }
 
     bytes32 private constant _TYPEHASH = keccak256(
-        "ForwardRequest(address from,address to,uint256 value,uint256 gas,uint256 nonce,bytes data)"
+        "ForwardRequest(address from,address to,uint256 value,uint256 gas,uint256 nonce,uint256 deadline,bytes data)"
     );
 
     mapping(address => uint256) private _nonces;
@@ -68,6 +69,14 @@ contract TokenxForwarder is EIP712, AccessControl, Pausable, ReentrancyGuard {
     }
 
     /**
+     * @notice Invalidate outstanding nonces up to upToNonce for msg.sender.
+     */
+    function invalidateNonce(uint256 upToNonce) external {
+        require(upToNonce > _nonces[msg.sender], "Forwarder: nonce already used or lower");
+        _nonces[msg.sender] = upToNonce;
+    }
+
+    /**
      * @notice Verify a ForwardRequest signature off-chain before submitting.
      * @return true if the signature is valid and the nonce matches.
      */
@@ -82,6 +91,7 @@ contract TokenxForwarder is EIP712, AccessControl, Pausable, ReentrancyGuard {
                 req.value,
                 req.gas,
                 req.nonce,
+                req.deadline,
                 keccak256(req.data)
             ))
         ).recover(signature);
@@ -103,6 +113,9 @@ contract TokenxForwarder is EIP712, AccessControl, Pausable, ReentrancyGuard {
         nonReentrant
         returns (bool success, bytes memory returndata)
     {
+        require(req.to != address(0), "Forwarder: zero target");
+        require(msg.value == req.value, "Forwarder: value mismatch");
+        require(block.timestamp <= req.deadline, "Forwarder: request expired");
         require(verify(req, signature), "Forwarder: invalid sig or nonce");
 
         _nonces[req.from] = req.nonce + 1;
@@ -119,6 +132,11 @@ contract TokenxForwarder is EIP712, AccessControl, Pausable, ReentrancyGuard {
     }
 
     // ── Admin ─────────────────────────────────────────────────────
+
+    function rescueETH(address to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        (bool ok,) = payable(to).call{value: amount}("");
+        require(ok, "Forwarder: rescue failed");
+    }
 
     function pause()   external onlyRole(DEFAULT_ADMIN_ROLE) { _pause(); }
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) { _unpause(); }

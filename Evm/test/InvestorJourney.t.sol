@@ -92,7 +92,7 @@ contract InvestorJourneyTest is BaseTest {
     {
         factory.deployToken(
             TokenizationFactory.TokenType.SECURITY,
-            id, "Acme Equity", "ACME", address(0), issuer, noLimits
+            id, "Acme Equity", "ACME", address(0x101), issuer, noLimits
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(id);
         tok  = SecurityToken(payable(rec.token));
@@ -107,7 +107,7 @@ contract InvestorJourneyTest is BaseTest {
     {
         factory.deployToken(
             TokenizationFactory.TokenType.YIELD_BEARING,
-            id, "Acme Yield Note", "ACMYN", address(0), issuer, noLimits
+            id, "Acme Yield Note", "ACMYN", address(0x101), issuer, noLimits
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(id);
         tok  = SecurityToken(payable(rec.token));
@@ -134,7 +134,7 @@ contract InvestorJourneyTest is BaseTest {
             admin:                   issuer,
             earlyRedemptionFeeBps:   0
         });
-        factory.deployBond(id, "Acme Bond 5y", "ACMB5", address(0), issuer, noLimits, p);
+        factory.deployBond(id, "Acme Bond 5y", "ACMB5", address(0x101), issuer, noLimits, p);
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment(id);
         tok   = SecurityToken(payable(rec.token));
         reg   = IdentityRegistry(rec.identityRegistry);

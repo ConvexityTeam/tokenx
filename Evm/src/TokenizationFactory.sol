@@ -169,9 +169,14 @@ contract TokenizationFactory is AccessControl, Pausable {
         whenNotPaused
         returns (address token, address bondTermsAddr)
     {
+        require(bytes(issuerId).length > 0,           "Factory: empty issuerId");
+        require(issuerDeploymentIndex[issuerId] == 0, "Factory: issuerId taken");
+        require(tokenAdmin != address(0),             "Factory: zero tokenAdmin");
+        require(issuerOnchainID != address(0),        "Factory: zero issuer onchainID");
+
         // 1. Deploy and seal BondTerms first so the token can be wired to it.
         BondTerms.InitParams memory params = bondParams;
-        params.admin = tokenAdmin;
+        params.admin = address(this);
         bondTermsAddr = address(new BeaconProxy(
             beaconBT,
             abi.encodeCall(BondTerms.initialize, (params, trustedForwarder))
@@ -198,6 +203,7 @@ contract TokenizationFactory is AccessControl, Pausable {
     ) internal returns (address token, address yieldDist) {
         require(bytes(issuerId).length > 0,           "Factory: empty issuerId");
         require(tokenAdmin != address(0),             "Factory: zero tokenAdmin");
+        require(issuerOnchainID != address(0),        "Factory: zero issuer onchainID");
         require(issuerDeploymentIndex[issuerId] == 0, "Factory: issuerId taken");
 
         // 1. IdentityRegistry — tokenAdmin is admin from the start
@@ -247,6 +253,8 @@ contract TokenizationFactory is AccessControl, Pausable {
             SecurityToken(payable(token)).setBondTerms(bondTermsAddr);
             YieldDistributor(payable(yieldDist)).setBondTerms(bondTermsAddr);
             BondTerms(bondTermsAddr).bindConsumers(token, yieldDist);
+            BondTerms(bondTermsAddr).setPenaltyRecipient(tokenAdmin);
+            BondTerms(bondTermsAddr).setAdmin(tokenAdmin);
         }
 
         // 7. Transfer all roles to tokenAdmin, renounce factory's temporary roles

@@ -84,6 +84,7 @@ contract BondTerms is Initializable {
     event PrincipalRepaid(uint256 atTimestamp);
     event EarlyRedemptionFeeSet(uint256 oldFeeBps, uint256 newFeeBps);
     event PenaltyRecipientSet(address indexed oldRecipient, address indexed newRecipient);
+    event AdminTransferred(address indexed previousAdmin, address indexed newAdmin);
 
     struct InitParams {
         uint256  annualRateBps;
@@ -106,6 +107,7 @@ contract BondTerms is Initializable {
 
     function initialize(InitParams calldata p, address trustedForwarder_) external initializer {
         require(p.maturityDate > p.issueDate,                           "BT: maturity <= issue");
+        require(p.maturityDate > block.timestamp,                       "BT: maturity in the past");
         require(p.couponPeriodSeconds > 0,                              "BT: zero coupon period");
         require(p.firstCouponDate > p.issueDate,                        "BT: first coupon <= issue");
         require(p.firstCouponDate <= p.maturityDate,                    "BT: first coupon > maturity");
@@ -165,6 +167,7 @@ contract BondTerms is Initializable {
     // ── One-shot consumer wiring ──────────────────────────────────
 
     function bindConsumers(address _securityToken, address _yieldDistributor) external {
+        require(_msgSender() == admin, "BT: not admin");
         require(
             securityToken == address(0) && yieldDistributor == address(0), "BT: already bound"
         );
@@ -174,6 +177,16 @@ contract BondTerms is Initializable {
         securityToken    = _securityToken;
         yieldDistributor = _yieldDistributor;
         emit ConsumersBound(_securityToken, _yieldDistributor);
+    }
+
+    // ── Admin management ──────────────────────────────────────────
+
+    function setAdmin(address newAdmin) external {
+        require(_msgSender() == admin, "BT: not admin");
+        require(newAdmin != address(0), "BT: zero admin");
+        address oldAdmin = admin;
+        admin = newAdmin;
+        emit AdminTransferred(oldAdmin, newAdmin);
     }
 
     // ── Rate management ───────────────────────────────────────────
@@ -210,6 +223,7 @@ contract BondTerms is Initializable {
     /// @notice Update the address that receives early-redemption penalties.
     function setPenaltyRecipient(address newRecipient) external {
         require(_msgSender() == admin,      "BT: not admin");
+        require(!principalRepaid,           "BT: bond closed");
         require(newRecipient != address(0), "BT: zero recipient");
         address old = penaltyRecipient;
         penaltyRecipient = newRecipient;

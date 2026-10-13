@@ -138,6 +138,7 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
     }
 
     function setOnchainID(address id) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(id != address(0), "ST: zero onchainID");
         onchainID = id;
         emit UpdatedTokenInformation(name(), symbol(), 18, VERSION, id);
     }
@@ -169,6 +170,7 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
     // ── Mint / Burn ───────────────────────────────────────────────
 
     function mint(address to, uint256 amount) public onlyRole(AGENT_ROLE) whenNotPaused {
+        require(amount > 0, "ST: zero amount");
         require(_identityRegistry.isVerified(to), "ST: recipient not verified");
         require(_compliance.canTransfer(address(0), to, amount), "ST: compliance rejected");
         _mint(to, amount);
@@ -176,6 +178,8 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
     }
 
     function burn(address from, uint256 amount) public onlyRole(AGENT_ROLE) whenNotPaused {
+        require(amount > 0, "ST: zero amount");
+        require(!_frozen[from], "ST: wallet frozen");
         require(balanceOf(from) - _frozenTokens[from] >= amount, "ST: insufficient unfrozen");
         _burn(from, amount);
         _compliance.destroyed(from, amount);
@@ -184,6 +188,8 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
     // ── Forced transfer ───────────────────────────────────────────
 
     function _forcedTransferInternal(address from, address to, uint256 amount) internal returns (bool) {
+        require(amount > 0, "ST: zero amount");
+        require(!_frozen[from] && !_frozen[to], "ST: wallet frozen");
         require(_identityRegistry.isVerified(to), "ST: recipient not verified");
         uint256 freeBalance = balanceOf(from) - _frozenTokens[from];
         require(freeBalance >= amount, "ST: insufficient unfrozen balance");
@@ -204,6 +210,8 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
         external onlyRole(AGENT_ROLE) whenNotPaused nonReentrant returns (bool)
     {
         require(investorOnchainID != address(0),         "ST: zero onchainID");
+        require(newWallet != lostWallet,                 "ST: no self-recovery");
+        require(!_frozen[lostWallet],                    "ST: wallet frozen");
         require(_identityRegistry.identity(lostWallet) == investorOnchainID, "ST: lost wallet mismatch");
         require(_identityRegistry.identity(newWallet)  == investorOnchainID, "ST: new wallet mismatch");
         require(_identityRegistry.isVerified(newWallet), "ST: new wallet not verified");
@@ -211,7 +219,7 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
         _transfer(lostWallet, newWallet, bal);
         _frozenTokens[newWallet] = _frozenTokens[lostWallet];
         delete _frozenTokens[lostWallet];
-        _compliance.transferred(lostWallet, newWallet, bal);
+        _compliance.recovered(lostWallet, newWallet, bal);
         emit RecoverySuccess(lostWallet, newWallet, investorOnchainID);
         return true;
     }
@@ -227,7 +235,10 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
     {
         require(address(bondTerms) != address(0), "ST: no bond terms");
         require(bondTerms.isMatured(),            "ST: not matured");
+        require(_identityRegistry.isVerified(holder), "ST: holder not verified");
         require(_compliance.canHold(holder),      "ST: holder not eligible");
+        require(!_frozen[holder],                 "ST: address frozen");
+        require(_frozenTokens[holder] == 0,       "ST: holder has frozen tokens");
 
         uint256 bal = balanceOf(holder);
         require(bal > 0, "ST: zero balance");
@@ -262,6 +273,8 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
         uint256 face = bondTerms.faceValuePerToken();
         for (uint256 i = 0; i < holders.length; i++) {
             address holder = holders[i];
+            if (_frozen[holder] || _frozenTokens[holder] > 0) continue;
+            if (!_identityRegistry.isVerified(holder)) continue;
             if (!_compliance.canHold(holder)) continue;
             uint256 bal = balanceOf(holder);
             if (bal == 0) continue;
@@ -298,7 +311,10 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
         require(!bondTerms.defaulted(),                  "ST: bond defaulted");
         require(!bondTerms.principalRepaid(),            "ST: bond closed");
         require(bondTerms.earlyRedemptionFeeBps() > 0,  "ST: early redemption disabled");
+        require(_identityRegistry.isVerified(holder),    "ST: holder not verified");
         require(_compliance.canHold(holder),             "ST: holder not eligible");
+        require(!_frozen[holder],                        "ST: address frozen");
+        require(_frozenTokens[holder] == 0,              "ST: holder has frozen tokens");
 
         uint256 bal = balanceOf(holder);
         require(bal > 0, "ST: zero balance");
@@ -330,6 +346,20 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
         }
 
         emit EarlyRedemption(holder, bal, payout, penalty, recipient);
+    }
+
+    function rescueFunds(address token, address to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(address(bondTerms) == address(0) || bondTerms.principalRepaid() || totalSupply() == 0, "ST: bond active");
+        if (token == address(0)) {
+            (bool ok,) = payable(to).call{value: amount}("");
+            require(ok, "ST: rescue failed");
+        } else {
+            IERC20(token).safeTransfer(to, amount);
+        }
+    }
+
+    function setTrustedForwarder(address newForwarder) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        trustedForwarder = newForwarder;
     }
 
     /// @notice Accept payoutToken funds for principal repayment (or ETH).
@@ -428,6 +458,7 @@ contract SecurityToken is ERC20, AccessControl, Pausable, ReentrancyGuard, Initi
     }
 
     function _compliantTransfer(address from, address to, uint256 amount) internal {
+        require(amount > 0,                          "ST: zero amount");
         require(!_frozen[from] && !_frozen[to],      "ST: wallet frozen");
         require(_identityRegistry.isVerified(from),  "ST: sender not verified");
         require(_identityRegistry.isVerified(to),    "ST: recipient not verified");

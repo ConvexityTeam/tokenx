@@ -7,18 +7,32 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../src/BusinessWallet.sol";
 import "../src/WalletFactory.sol";
 
+// ── Test helpers ──────────────────────────────────────────────────────────────
+
 contract MockERC20WF is ERC20 {
     constructor() ERC20("MockWF", "MWF") {}
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
 }
+
+/// @dev Refuses ETH — used to fill a wallet's balance without auto-forwarding.
+contract RejectETHWF {
+    receive() external payable {
+        revert("reject");
+    }
+}
+
+// ── Main test contract ────────────────────────────────────────────────────────
 
 contract WalletFactoryTest is Test {
     BusinessWallet impl;
     WalletFactory  factory;
 
-    address admin    = makeAddr("admin");
-    address pool     = makeAddr("pool");
-    address user     = makeAddr("user");
+    address admin   = makeAddr("admin");
+    address pool    = makeAddr("pool");
+    address user    = makeAddr("user");
     address deployer = makeAddr("deployer");
 
     bytes32 constant BID  = keccak256("biz-1");
@@ -46,11 +60,13 @@ contract WalletFactoryTest is Test {
     }
 
     function test_constructor_beaconOwnedByAdmin() public {
-        assertEq(UpgradeableBeacon(factory.walletBeacon()).owner(), admin);
+        UpgradeableBeacon beacon = UpgradeableBeacon(factory.walletBeacon());
+        assertEq(beacon.owner(), admin);
     }
 
     function test_constructor_beaconPointsToImpl() public {
-        assertEq(UpgradeableBeacon(factory.walletBeacon()).implementation(), address(impl));
+        UpgradeableBeacon beacon = UpgradeableBeacon(factory.walletBeacon());
+        assertEq(beacon.implementation(), address(impl));
     }
 
     function test_constructor_withForwarder() public {
@@ -86,6 +102,7 @@ contract WalletFactoryTest is Test {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
         BusinessWallet bw = BusinessWallet(payable(w));
+
         assertEq(bw.businessId(), BID);
         assertEq(bw.poolWallet(), pool);
         assertTrue(bw.hasRole(bw.DEFAULT_ADMIN_ROLE(), admin));
@@ -101,9 +118,10 @@ contract WalletFactoryTest is Test {
     function test_createWallet_registersRecord() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
         WalletFactory.WalletRecord memory rec = factory.getWallet(BID);
-        assertEq(rec.wallet, w);
-        assertEq(rec.admin, admin);
+        assertEq(rec.wallet,     w);
+        assertEq(rec.admin,      admin);
         assertEq(rec.deployedBy, admin);
         assertEq(rec.businessId, BID);
         assertTrue(rec.active);
@@ -136,6 +154,7 @@ contract WalletFactoryTest is Test {
     function test_createWallet_revert_whenPaused() public {
         vm.prank(admin);
         factory.pause();
+
         vm.prank(admin);
         vm.expectRevert("Pausable: paused");
         factory.createWallet(BID, admin);
@@ -156,6 +175,7 @@ contract WalletFactoryTest is Test {
     function test_createWallet_revert_duplicateBusinessId() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         vm.prank(admin);
         vm.expectRevert("WF: businessId taken");
         factory.createWallet(BID, admin);
@@ -165,16 +185,20 @@ contract WalletFactoryTest is Test {
 
     function test_createWalletDeterministic_deploysAtPredictedAddress() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
+
         address predicted = factory.predictWalletAddress(BID, admin, salt);
+
         vm.prank(admin);
-        address deployed = factory.createWalletDeterministic(BID, admin, salt);
+        address deployed = factory.createWalletDeterministic(BID, admin, salt, pool);
+
         assertEq(deployed, predicted);
     }
 
     function test_createWalletDeterministic_initializedCorrectly() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
-        address w = factory.createWalletDeterministic(BID, admin, salt);
+        address w = factory.createWalletDeterministic(BID, admin, salt, pool);
+
         BusinessWallet bw = BusinessWallet(payable(w));
         assertEq(bw.businessId(), BID);
         assertEq(bw.poolWallet(), pool);
@@ -183,7 +207,8 @@ contract WalletFactoryTest is Test {
     function test_createWalletDeterministic_registersRecord() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
-        address w = factory.createWalletDeterministic(BID, admin, salt);
+        address w = factory.createWalletDeterministic(BID, admin, salt, pool);
+
         WalletFactory.WalletRecord memory rec = factory.getWallet(BID);
         assertEq(rec.wallet, w);
         assertTrue(rec.active);
@@ -192,46 +217,63 @@ contract WalletFactoryTest is Test {
     function test_createWalletDeterministic_differentSalts_differentAddresses() public {
         bytes32 salt1 = keccak256(abi.encode(BID,  1));
         bytes32 salt2 = keccak256(abi.encode(BID2, 2));
+
         vm.prank(admin);
-        address w1 = factory.createWalletDeterministic(BID, admin, salt1);
+        address w1 = factory.createWalletDeterministic(BID, admin, salt1, pool);
         vm.prank(admin);
-        address w2 = factory.createWalletDeterministic(BID2, admin, salt2);
+        address w2 = factory.createWalletDeterministic(BID2, admin, salt2, pool);
+
         assertTrue(w1 != w2);
     }
 
     function test_createWalletDeterministic_revert_notDeployer() public {
+        bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(user);
         vm.expectRevert();
-        factory.createWalletDeterministic(BID, admin, bytes32(0));
+        factory.createWalletDeterministic(BID, admin, salt, pool);
     }
 
     function test_createWalletDeterministic_revert_whenPaused() public {
         vm.prank(admin);
         factory.pause();
+
+        bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
         vm.expectRevert("Pausable: paused");
-        factory.createWalletDeterministic(BID, admin, bytes32(0));
+        factory.createWalletDeterministic(BID, admin, salt, pool);
     }
 
     function test_createWalletDeterministic_revert_emptyBusinessId() public {
+        bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
         vm.expectRevert("WF: empty businessId");
-        factory.createWalletDeterministic(bytes32(0), admin, bytes32(0));
+        factory.createWalletDeterministic(bytes32(0), admin, salt, pool);
     }
 
     function test_createWalletDeterministic_revert_zeroAdmin() public {
+        bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
         vm.expectRevert("WF: zero admin");
-        factory.createWalletDeterministic(BID, address(0), bytes32(0));
+        factory.createWalletDeterministic(BID, address(0), salt, pool);
     }
 
     function test_createWalletDeterministic_revert_duplicateBusinessId() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, pool);
+
+        bytes32 salt2 = keccak256(abi.encode(BID, 2));
         vm.prank(admin);
         vm.expectRevert("WF: businessId taken");
-        factory.createWalletDeterministic(BID, admin, keccak256(abi.encode(BID, 2)));
+        factory.createWalletDeterministic(BID, admin, salt2, pool);
+    }
+
+    function test_createWalletDeterministic_revert_poolWalletDrifted() public {
+        bytes32 salt = keccak256(abi.encode(BID, 1));
+        address wrongPool = makeAddr("wrongPool");
+        vm.prank(admin);
+        vm.expectRevert("WF: poolWallet drifted since prediction");
+        factory.createWalletDeterministic(BID, admin, salt, wrongPool);
     }
 
     // ── predictWalletAddress ──────────────────────────────────────────────────
@@ -239,8 +281,10 @@ contract WalletFactoryTest is Test {
     function test_predictWalletAddress_matchesDeployment() public {
         bytes32 salt = keccak256(abi.encode(BID, 42));
         address predicted = factory.predictWalletAddress(BID, admin, salt);
+
         vm.prank(admin);
-        address actual = factory.createWalletDeterministic(BID, admin, salt);
+        address actual = factory.createWalletDeterministic(BID, admin, salt, pool);
+
         assertEq(actual, predicted);
     }
 
@@ -256,6 +300,8 @@ contract WalletFactoryTest is Test {
     function test_sweepWalletETH_success() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
+        // Fund the wallet while it is paused so auto-forward doesn't drain it
         BusinessWallet bw = BusinessWallet(payable(w));
         vm.prank(admin);
         bw.pause();
@@ -265,6 +311,7 @@ contract WalletFactoryTest is Test {
         assertTrue(ok);
         vm.prank(admin);
         bw.unpause();
+
         uint256 before = pool.balance;
         vm.prank(admin);
         factory.sweepWalletETH(BID);
@@ -274,6 +321,7 @@ contract WalletFactoryTest is Test {
     function test_sweepWalletETH_revert_notDeployer() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         vm.prank(user);
         vm.expectRevert();
         factory.sweepWalletETH(BID);
@@ -290,27 +338,35 @@ contract WalletFactoryTest is Test {
     function test_sweepWalletTokens_success() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
         MockERC20WF token = new MockERC20WF();
         token.mint(w, 500e18);
+
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
+
         vm.prank(admin);
         factory.sweepWalletTokens(BID, tokens);
+
         assertEq(token.balanceOf(pool), 500e18);
     }
 
     function test_sweepWalletTokens_multipleTokens() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
         MockERC20WF t1 = new MockERC20WF();
         MockERC20WF t2 = new MockERC20WF();
         t1.mint(w, 100e18);
         t2.mint(w, 200e18);
+
         address[] memory tokens = new address[](2);
         tokens[0] = address(t1);
         tokens[1] = address(t2);
+
         vm.prank(admin);
         factory.sweepWalletTokens(BID, tokens);
+
         assertEq(t1.balanceOf(pool), 100e18);
         assertEq(t2.balanceOf(pool), 200e18);
     }
@@ -318,6 +374,7 @@ contract WalletFactoryTest is Test {
     function test_sweepWalletTokens_revert_notDeployer() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         address[] memory tokens = new address[](0);
         vm.prank(user);
         vm.expectRevert();
@@ -352,6 +409,7 @@ contract WalletFactoryTest is Test {
         address newPool = makeAddr("newPool");
         vm.prank(admin);
         factory.setPoolWallet(newPool);
+
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
         assertEq(BusinessWallet(payable(w)).poolWallet(), newPool);
@@ -374,14 +432,18 @@ contract WalletFactoryTest is Test {
     function test_deactivateWallet_setsInactive() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         vm.prank(admin);
         factory.deactivateWallet(BID);
-        assertFalse(factory.getWallet(BID).active);
+
+        WalletFactory.WalletRecord memory rec = factory.getWallet(BID);
+        assertFalse(rec.active);
     }
 
     function test_deactivateWallet_emitsEvent() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
         vm.expectEmit(true, true, false, false);
         emit WalletFactory.WalletDeactivated(BID, w);
         vm.prank(admin);
@@ -391,6 +453,7 @@ contract WalletFactoryTest is Test {
     function test_deactivateWallet_revert_notAdmin() public {
         vm.prank(admin);
         factory.createWallet(BID, admin);
+
         vm.prank(user);
         vm.expectRevert();
         factory.deactivateWallet(BID);
@@ -433,14 +496,15 @@ contract WalletFactoryTest is Test {
         factory.unpause();
     }
 
-    // ── getWallet / walletOf / totalWallets ───────────────────────────────────
+    // ── getWallet ─────────────────────────────────────────────────────────────
 
     function test_getWallet_returnsFullRecord() public {
         vm.prank(admin);
         address w = factory.createWallet(BID, admin);
+
         WalletFactory.WalletRecord memory rec = factory.getWallet(BID);
-        assertEq(rec.wallet, w);
-        assertEq(rec.admin, admin);
+        assertEq(rec.wallet,     w);
+        assertEq(rec.admin,      admin);
         assertEq(rec.deployedBy, admin);
         assertEq(rec.businessId, BID);
         assertTrue(rec.active);
@@ -450,6 +514,8 @@ contract WalletFactoryTest is Test {
         vm.expectRevert("WF: unknown businessId");
         factory.getWallet(BID);
     }
+
+    // ── walletOf ──────────────────────────────────────────────────────────────
 
     function test_walletOf_returnsAddressForKnown() public {
         vm.prank(admin);
@@ -461,6 +527,8 @@ contract WalletFactoryTest is Test {
         assertEq(factory.walletOf(BID), address(0));
     }
 
+    // ── totalWallets ──────────────────────────────────────────────────────────
+
     function test_totalWallets_startsAtZero() public {
         assertEq(factory.totalWallets(), 0);
     }
@@ -469,12 +537,13 @@ contract WalletFactoryTest is Test {
         vm.prank(admin);
         factory.createWallet(BID, admin);
         assertEq(factory.totalWallets(), 1);
+
         vm.prank(admin);
         factory.createWallet(BID2, admin);
         assertEq(factory.totalWallets(), 2);
     }
 
-    // ── getWallets pagination ─────────────────────────────────────────────────
+    // ── getWallets (pagination) ───────────────────────────────────────────────
 
     function _deployThree() internal returns (address w1, address w2, address w3) {
         vm.startPrank(admin);
@@ -534,13 +603,18 @@ contract WalletFactoryTest is Test {
         assertEq(factory.PAUSER_ROLE(),       keccak256("PAUSER_ROLE"));
     }
 
+    // ── Deployer role granted to non-admin ───────────────────────────────────
+
     function test_createWallet_byGrantedDeployer() public {
         bytes32 deployerRole = factory.DEPLOYER_ROLE();
         vm.prank(admin);
         factory.grantRole(deployerRole, deployer);
+
         vm.prank(deployer);
         address w = factory.createWallet(BID, admin);
         assertTrue(w != address(0));
-        assertEq(factory.getWallet(BID).deployedBy, deployer);
+
+        WalletFactory.WalletRecord memory rec = factory.getWallet(BID);
+        assertEq(rec.deployedBy, deployer);
     }
 }

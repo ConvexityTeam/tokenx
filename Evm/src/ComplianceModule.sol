@@ -157,6 +157,7 @@ contract ComplianceModule is ICompliance, AccessControl, Initializable {
     }
 
     function transferred(address from, address to, uint256 amount) external override onlyToken {
+        if (amount == 0) return;
         if (from != address(0)) {
             holderBalance[from] = holderBalance[from] >= amount
                 ? holderBalance[from] - amount : 0;
@@ -169,15 +170,37 @@ contract ComplianceModule is ICompliance, AccessControl, Initializable {
     }
 
     function created(address to, uint256 amount) external override onlyToken {
+        if (amount == 0) return;
         if (holderBalance[to] == 0) shareholderCount++;
         holderBalance[to] += amount;
-        if (lockUpDuration > 0) lockUpEnd[to] = block.timestamp + lockUpDuration;
+        if (lockUpDuration > 0) {
+            uint256 newEnd = block.timestamp + lockUpDuration;
+            if (newEnd > lockUpEnd[to]) {
+                lockUpEnd[to] = newEnd;
+            }
+        }
     }
 
     function destroyed(address from, uint256 amount) external override onlyToken {
+        if (amount == 0) return;
         holderBalance[from] = holderBalance[from] >= amount
             ? holderBalance[from] - amount : 0;
         if (holderBalance[from] == 0 && shareholderCount > 0) shareholderCount--;
+    }
+
+    function recovered(address oldWallet, address newWallet, uint256 amount) external override onlyToken {
+        if (amount == 0) return;
+        if (oldWallet != address(0)) {
+            holderBalance[oldWallet] = holderBalance[oldWallet] >= amount
+                ? holderBalance[oldWallet] - amount : 0;
+            if (holderBalance[oldWallet] == 0 && shareholderCount > 0) shareholderCount--;
+        }
+        if (newWallet != address(0)) {
+            if (holderBalance[newWallet] == 0) shareholderCount++;
+            holderBalance[newWallet] += amount;
+        }
+        lockUpEnd[newWallet] = lockUpEnd[oldWallet];
+        delete lockUpEnd[oldWallet];
     }
 
     // ── Admin ─────────────────────────────────────────────────────

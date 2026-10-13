@@ -189,7 +189,7 @@ contract WalletFactoryTest is Test {
         address predicted = factory.predictWalletAddress(BID, admin, salt);
 
         vm.prank(admin);
-        address deployed = factory.createWalletDeterministic(BID, admin, salt);
+        address deployed = factory.createWalletDeterministic(BID, admin, salt, pool);
 
         assertEq(deployed, predicted);
     }
@@ -197,7 +197,7 @@ contract WalletFactoryTest is Test {
     function test_createWalletDeterministic_initializedCorrectly() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
-        address w = factory.createWalletDeterministic(BID, admin, salt);
+        address w = factory.createWalletDeterministic(BID, admin, salt, pool);
 
         BusinessWallet bw = BusinessWallet(payable(w));
         assertEq(bw.businessId(), BID);
@@ -207,7 +207,7 @@ contract WalletFactoryTest is Test {
     function test_createWalletDeterministic_registersRecord() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
-        address w = factory.createWalletDeterministic(BID, admin, salt);
+        address w = factory.createWalletDeterministic(BID, admin, salt, pool);
 
         WalletFactory.WalletRecord memory rec = factory.getWallet(BID);
         assertEq(rec.wallet, w);
@@ -219,9 +219,9 @@ contract WalletFactoryTest is Test {
         bytes32 salt2 = keccak256(abi.encode(BID2, 2));
 
         vm.prank(admin);
-        address w1 = factory.createWalletDeterministic(BID, admin, salt1);
+        address w1 = factory.createWalletDeterministic(BID, admin, salt1, pool);
         vm.prank(admin);
-        address w2 = factory.createWalletDeterministic(BID2, admin, salt2);
+        address w2 = factory.createWalletDeterministic(BID2, admin, salt2, pool);
 
         assertTrue(w1 != w2);
     }
@@ -230,7 +230,7 @@ contract WalletFactoryTest is Test {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(user);
         vm.expectRevert();
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, pool);
     }
 
     function test_createWalletDeterministic_revert_whenPaused() public {
@@ -240,32 +240,40 @@ contract WalletFactoryTest is Test {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
         vm.expectRevert("Pausable: paused");
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, pool);
     }
 
     function test_createWalletDeterministic_revert_emptyBusinessId() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
         vm.expectRevert("WF: empty businessId");
-        factory.createWalletDeterministic(bytes32(0), admin, salt);
+        factory.createWalletDeterministic(bytes32(0), admin, salt, pool);
     }
 
     function test_createWalletDeterministic_revert_zeroAdmin() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
         vm.expectRevert("WF: zero admin");
-        factory.createWalletDeterministic(BID, address(0), salt);
+        factory.createWalletDeterministic(BID, address(0), salt, pool);
     }
 
     function test_createWalletDeterministic_revert_duplicateBusinessId() public {
         bytes32 salt = keccak256(abi.encode(BID, 1));
         vm.prank(admin);
-        factory.createWalletDeterministic(BID, admin, salt);
+        factory.createWalletDeterministic(BID, admin, salt, pool);
 
         bytes32 salt2 = keccak256(abi.encode(BID, 2));
         vm.prank(admin);
         vm.expectRevert("WF: businessId taken");
-        factory.createWalletDeterministic(BID, admin, salt2);
+        factory.createWalletDeterministic(BID, admin, salt2, pool);
+    }
+
+    function test_createWalletDeterministic_revert_poolWalletDrifted() public {
+        bytes32 salt = keccak256(abi.encode(BID, 1));
+        address wrongPool = makeAddr("wrongPool");
+        vm.prank(admin);
+        vm.expectRevert("WF: poolWallet drifted since prediction");
+        factory.createWalletDeterministic(BID, admin, salt, wrongPool);
     }
 
     // ── predictWalletAddress ──────────────────────────────────────────────────
@@ -275,7 +283,7 @@ contract WalletFactoryTest is Test {
         address predicted = factory.predictWalletAddress(BID, admin, salt);
 
         vm.prank(admin);
-        address actual = factory.createWalletDeterministic(BID, admin, salt);
+        address actual = factory.createWalletDeterministic(BID, admin, salt, pool);
 
         assertEq(actual, predicted);
     }

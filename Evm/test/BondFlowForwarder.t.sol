@@ -59,7 +59,7 @@ contract BondFlowForwarderTest is BaseTest {
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
     );
     bytes32 constant REQUEST_TYPEHASH = keccak256(
-        "ForwardRequest(address from,address to,uint256 value,uint256 gas,uint256 nonce,bytes data)"
+        "ForwardRequest(address from,address to,uint256 value,uint256 gas,uint256 nonce,uint256 deadline,bytes data)"
     );
 
     // ─────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ contract BondFlowForwarderTest is BaseTest {
 
         (address t, address bt) = factory.deployBond(
             "FWD-BOND-001", "Forwarder Bond 5y", "FWDB5",
-            address(0), address(this), noLimits, bondParams
+            address(0x101), address(this), noLimits, bondParams
         );
 
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("FWD-BOND-001");
@@ -139,17 +139,18 @@ contract BondFlowForwarderTest is BaseTest {
         bytes memory data
     ) internal view returns (TokenxForwarder.ForwardRequest memory req, bytes memory sig) {
         req = TokenxForwarder.ForwardRequest({
-            from:  from,
-            to:    to,
-            value: value,
-            gas:   600_000,
-            nonce: forwarder.getNonce(from),
-            data:  data
+            from:     from,
+            to:       to,
+            value:    value,
+            gas:      600_000,
+            nonce:    forwarder.getNonce(from),
+            deadline: block.timestamp + 1 hours,
+            data:     data
         });
 
         bytes32 structHash = keccak256(abi.encode(
             REQUEST_TYPEHASH,
-            req.from, req.to, req.value, req.gas, req.nonce,
+            req.from, req.to, req.value, req.gas, req.nonce, req.deadline,
             keccak256(req.data)
         ));
         bytes32 domainSep = keccak256(abi.encode(

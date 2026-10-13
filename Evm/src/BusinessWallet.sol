@@ -147,11 +147,11 @@ contract BusinessWallet is Initializable, AccessControl, Pausable {
     // ── Receive / Fallback ────────────────────────────────────────────────────────
 
     /// @dev Forward ETH to pool on receipt. Single external call — minimal gas.
-    receive() external payable {
+    receive() external payable nonReentrant {
         _handleIncomingETH(msg.value);
     }
 
-    fallback() external payable {
+    fallback() external payable nonReentrant {
         if (msg.value > 0) _handleIncomingETH(msg.value);
     }
 

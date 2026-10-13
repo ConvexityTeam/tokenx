@@ -155,13 +155,15 @@ contract WalletFactory is AccessControl, Pausable {
     function createWalletDeterministic(
         bytes32 businessId,
         address admin,
-        bytes32 salt
+        bytes32 salt,
+        address expectedPoolWallet
     )
         external
         onlyRole(DEPLOYER_ROLE)
         whenNotPaused
         returns (address wallet)
     {
+        require(poolWallet == expectedPoolWallet, "WF: poolWallet drifted since prediction");
         _validateArgs(businessId, admin);
         wallet = _deploy(businessId, admin, salt, true);
     }
@@ -288,8 +290,7 @@ contract WalletFactory is AccessControl, Pausable {
         uint256 total = _walletIds.length;
         if (offset >= total) return new WalletRecord[](0);
 
-        uint256 end   = offset + limit;
-        if (end > total) end = total;
+        uint256 end = (limit > total - offset) ? total : offset + limit;
         uint256 count = end - offset;
 
         records = new WalletRecord[](count);

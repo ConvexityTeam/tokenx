@@ -104,7 +104,7 @@ contract EarlyRedemptionTest is BaseTest {
     function _deployBond(uint256 feeBps) internal {
         (address t, address bt) = factory.deployBond(
             "BOND-001", "Acme Bond 5y", "ACMB5",
-            address(0), admin, noLimits, _bondParams(feeBps)
+            address(0x101), admin, noLimits, _bondParams(feeBps)
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("BOND-001");
         token       = SecurityToken(payable(t));
@@ -303,7 +303,7 @@ contract EarlyRedemptionTest is BaseTest {
 
         (address t,) = factory.deployBond(
             "ETH-BOND", "ETH Bond", "ETHB",
-            address(0), admin, noLimits, p
+            address(0x101), admin, noLimits, p
         );
         TokenizationFactory.DeploymentRecord memory rec = factory.getDeployment("ETH-BOND");
         SecurityToken ethToken  = SecurityToken(payable(t));
@@ -338,14 +338,21 @@ contract EarlyRedemptionTest is BaseTest {
         token.redeemEarly(alice, address(usdc));
     }
 
-    function test_redeemEarly_clearsFrozenTokens() public {
+    function testRevert_redeemEarly_holderHasFrozenTokens() public {
         _setupHolder(alice, 10 ether);
         token.freezePartialTokens(alice, 3 ether);
         assertEq(token.getFrozenTokens(alice), 3 ether);
 
+        vm.expectRevert("ST: holder has frozen tokens");
         token.redeemEarly(alice, address(usdc));
+    }
 
-        assertEq(token.getFrozenTokens(alice), 0);
+    function testRevert_redeemEarly_addressFrozen() public {
+        _setupHolder(alice, 10 ether);
+        token.setAddressFrozen(alice, true);
+
+        vm.expectRevert("ST: address frozen");
+        token.redeemEarly(alice, address(usdc));
     }
 
     function test_redeemEarly_multipleInvestors_independent() public {
